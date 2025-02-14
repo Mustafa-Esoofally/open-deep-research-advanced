@@ -36,6 +36,35 @@ export type SerpQuery = {
   researchGoal: string;
 };
 
+// Add new types for extraction
+export type ExtractionResult = {
+  key_findings: string[];
+  expert_opinions: Array<{
+    expert: string;
+    opinion: string;
+    credentials?: string;
+  }>;
+  statistical_data: Array<{
+    metric: string;
+    value: string;
+    context: string;
+  }>;
+  counter_arguments: string[];
+  research_gaps: string[];
+};
+
+// Add extraction status type
+export type ExtractionStatus = 'pending' | 'completed' | 'failed' | 'cancelled';
+
+// Update ExtractResponse type to include jobId
+export type ExtractResponse = {
+  success: boolean;
+  data: ExtractionResult;
+  status: ExtractionStatus;
+  expiresAt: string;
+  jobId: string;  // Add jobId at the top level
+};
+
 // increase this if you have higher API rate limits
 const ConcurrencyLimit = 2;
 
@@ -44,6 +73,92 @@ const firecrawl = new FirecrawlApp({
   apiKey: process.env.FIRECRAWL_KEY ?? '',
   apiUrl: process.env.FIRECRAWL_BASE_URL,
 });
+
+// Add timeout configuration
+const EXTRACT_TIMEOUT_MS = 60000; // 1 minute
+const SEARCH_TIMEOUT_MS = 30000;  // 30 seconds
+
+// Add rate limiting configuration
+const RATE_LIMIT = {
+  MAX_REQUESTS_PER_MINUTE: 5,
+  BACKOFF_INITIAL_MS: 1000,
+  BACKOFF_MAX_MS: 60000,
+  BACKOFF_MULTIPLIER: 2
+};
+
+// Rate limiting state
+let requestCount = 0;
+let lastResetTime = Date.now();
+let currentBackoffMs = RATE_LIMIT.BACKOFF_INITIAL_MS;
+
+// Rate limiting utility functions
+async function waitForRateLimit() {
+  const now = Date.now();
+  const timeElapsed = now - lastResetTime;
+  
+  // Reset counter if a minute has passed
+  if (timeElapsed >= 60000) {
+    requestCount = 0;
+    lastResetTime = now;
+    currentBackoffMs = RATE_LIMIT.BACKOFF_INITIAL_MS;
+    return;
+  }
+
+  // If we've hit the rate limit, wait with exponential backoff
+  if (requestCount >= RATE_LIMIT.MAX_REQUESTS_PER_MINUTE) {
+    log(`Rate limit reached, waiting ${currentBackoffMs}ms before retry...`);
+    await new Promise(resolve => setTimeout(resolve, currentBackoffMs));
+    currentBackoffMs = Math.min(
+      currentBackoffMs * RATE_LIMIT.BACKOFF_MULTIPLIER,
+      RATE_LIMIT.BACKOFF_MAX_MS
+    );
+    requestCount = 0;
+    lastResetTime = Date.now();
+  }
+}
+
+// Wrap Firecrawl calls with rate limiting
+async function searchWithRateLimit(query: string, options: any = {}) {
+  while (true) {
+    try {
+      await waitForRateLimit();
+      requestCount++;
+      return await firecrawl.search(query, options);
+    } catch (error: any) {
+      if (error?.statusCode === 429) {
+        // Extract wait time from error message if available
+        const waitMatch = error.message.match(/retry after (\d+)s/);
+        const waitTime = waitMatch ? parseInt(waitMatch[1]) * 1000 : currentBackoffMs;
+        
+        log(`Rate limit exceeded, waiting ${waitTime}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
+async function extractWithRateLimit(urls: string[], options: any = {}) {
+  while (true) {
+    try {
+      await waitForRateLimit();
+      requestCount++;
+      return await firecrawl.extract(urls, options);
+    } catch (error: any) {
+      if (error?.statusCode === 429) {
+        // Extract wait time from error message if available
+        const waitMatch = error.message.match(/retry after (\d+)s/);
+        const waitTime = waitMatch ? parseInt(waitMatch[1]) * 1000 : currentBackoffMs;
+        
+        log(`Rate limit exceeded, waiting ${waitTime}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        continue;
+      }
+      throw error;
+    }
+  }
+}
 
 // take en user query, return a list of SERP queries
 async function generateSerpQueries({
@@ -88,6 +203,56 @@ async function generateSerpQueries({
   return result.object.queries.slice(0, numQueries);
 }
 
+// Add new function to create extraction prompt
+function createExtractionPrompt(query: string, learnings?: string[]): string {
+  return `
+    Research Topic: "${query}"
+    ${learnings?.length ? `Previous Findings: ${learnings.join('\n')}` : ''}
+    
+    Extract and organize the following information:
+    1. Key findings and main arguments
+    2. Expert opinions with credentials when available
+    3. Statistical data and metrics with context
+    4. Counter-arguments and alternative viewpoints
+    5. Identified research gaps or areas needing more investigation
+    
+    Please structure the information clearly and maintain academic rigor.
+  `.trim();
+}
+
+// Update waitForExtraction to use correct types
+async function waitForExtraction(
+  extractResponse: ExtractResponse,
+  maxAttempts = 30,
+  intervalMs = 2000
+): Promise<ExtractionResult> {
+  let attempts = 0;
+  let currentResponse = extractResponse;
+  
+  while (attempts < maxAttempts) {
+    if (currentResponse.status === 'completed') {
+      return currentResponse.data;
+    }
+    
+    if (currentResponse.status === 'failed' || currentResponse.status === 'cancelled') {
+      throw new Error(`Extraction failed with status: ${currentResponse.status}`);
+    }
+    
+    attempts++;
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+    
+    // Get updated status using the job ID from the response
+    const statusResponse = await firecrawl.getExtractStatus(currentResponse.jobId);
+    if (!statusResponse.success) {
+      throw new Error('Failed to get extraction status');
+    }
+    currentResponse = statusResponse;
+  }
+  
+  throw new Error('Extraction timed out');
+}
+
+// Update processSerpResult to use rate-limited functions
 async function processSerpResult({
   query,
   result,
@@ -99,34 +264,71 @@ async function processSerpResult({
   numLearnings?: number;
   numFollowUpQuestions?: number;
 }) {
+  // Start with basic content extraction
   const contents = compact(result.data.map((item: { markdown?: string }) => item.markdown)).map(
     (content: string) => trimPrompt(content, 25_000),
   );
-  log(`Ran ${query}, found ${contents.length} contents`);
+  
+  if (contents.length === 0) {
+    log(`No content found for query: ${query}`);
+    return {
+      learnings: [],
+      followUpQuestions: []
+    };
+  }
 
-  const response = await generateObject({
+  // Process content with our AI first to ensure we have base results
+  log(`Processing ${contents.length} content items for ${query}`);
+  const baseResponse = await generateObject({
     model: o3MiniModel,
     system: systemPrompt(),
-    prompt: `Given the following contents from a SERP search for the query <query>${query}</query>, generate a list of learnings from the contents. Return a maximum of ${numLearnings} learnings, but feel free to return less if the contents are clear. Make sure each learning is unique and not similar to each other. The learnings should be concise and to the point, as detailed and information dense as possible. Make sure to include any entities like people, places, companies, products, things, etc in the learnings, as well as any exact metrics, numbers, or dates. The learnings will be used to research the topic further.\n\n<contents>${contents
+    prompt: `Given the following contents from a search for <query>${query}</query>, generate key learnings. Return up to ${numLearnings} unique, detailed learnings with metrics and facts when available.\n\n<contents>${contents
       .map((content: string) => `<content>\n${content}\n</content>`)
       .join('\n')}</contents>`,
     schema: z.object({
-      learnings: z
-        .array(z.string())
-        .describe(`List of learnings, max of ${numLearnings}`),
-      followUpQuestions: z
-        .array(z.string())
-        .describe(
-          `List of follow-up questions to research the topic further, max of ${numFollowUpQuestions}`,
-        ),
+      learnings: z.array(z.string()).describe(`Key learnings, max ${numLearnings}`),
+      followUpQuestions: z.array(z.string()).describe(`Follow-up questions, max ${numFollowUpQuestions}`),
     }),
   });
 
-  log(
-    `Created ${response.object.learnings.length} learnings`,
-    response.object.learnings,
-  );
-  return response.object;
+  try {
+    // Try extraction only for the first URL to enhance base results
+    const mainUrl = result.data[0]?.url;
+    if (mainUrl) {
+      try {
+        const extractResponse = await extractWithRateLimit([mainUrl], {
+          prompt: createExtractionPrompt(query),
+          enableWebSearch: true
+        });
+
+        if (extractResponse.success) {
+          const extractionResult = extractResponse.data as ExtractionResult;
+          
+          // Combine base results with extraction results
+          return {
+            learnings: [
+              ...baseResponse.object.learnings,
+              ...extractionResult.key_findings,
+              ...extractionResult.expert_opinions.map(o => `Expert ${o.expert}: ${o.opinion}`),
+              ...extractionResult.statistical_data.map(s => `${s.metric}: ${s.value} (${s.context})`),
+              ...extractionResult.counter_arguments,
+            ].slice(0, numLearnings * 2), // Allow for more learnings when we have both sources
+            followUpQuestions: [
+              ...baseResponse.object.followUpQuestions,
+              ...extractionResult.research_gaps
+            ].slice(0, numFollowUpQuestions * 2)
+          };
+        }
+      } catch (error) {
+        log('Single URL extraction failed, using base results:', error);
+      }
+    }
+
+    return baseResponse.object;
+  } catch (error) {
+    log('Error in enhanced processing, returning base results:', error);
+    return baseResponse.object;
+  }
 }
 
 export async function writeFinalReport({
@@ -161,6 +363,7 @@ export async function writeFinalReport({
   return response.object.reportMarkdown + urlsSection;
 }
 
+// Update deepResearch to use rate-limited search
 export async function deepResearch({
   query,
   breadth,
@@ -207,7 +410,7 @@ export async function deepResearch({
     serpQueries.map((serpQuery: SerpQuery) =>
       limit(async () => {
         try {
-          const result = await firecrawl.search(serpQuery.query, {
+          const result = await searchWithRateLimit(serpQuery.query, {
             numResults: 10,
           });
 

@@ -7,7 +7,7 @@ const openrouter = createOpenRouter({
   apiKey: process.env.OPENROUTER_API_KEY!,
 });
 
-const customModel = process.env.OPENROUTER_MODEL || 'anthropic/claude-3-sonnet';
+const customModel = process.env.OPENROUTER_MODEL || 'openai/o3-mini';
 
 // Models
 export const o3MiniModel: LanguageModelV1 = openrouter(customModel);

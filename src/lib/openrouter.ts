@@ -3,7 +3,7 @@ import { generateText, streamText } from 'ai';
 
 // OpenRouter configuration
 export const openRouterConfig = {
-  defaultModel: 'openai/gpt-4',
+  defaultModel: 'openai/o3-mini',
 };
 
 // Function to generate text using OpenRouter
