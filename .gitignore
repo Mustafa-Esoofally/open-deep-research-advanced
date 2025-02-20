@@ -1,7 +1,9 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # Output files
+# Generated files
 output.md
+example-output.md
 
 # Dependencies
 node_modules
@@ -42,3 +44,10 @@ yarn-error.log*
 bun.lockb
 reference/
 package-lock.json
+backend/venv/
+**/__pycache__/**
+
+# windsurf rules
+.windsurfrules
+src/venv/
+venv/
