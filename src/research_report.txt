@@ -1,0 +1,89 @@
+Research Query:
+--------------
+What are the latest developments in quantum computing and its potential impact on cryptography?
+
+Research Results:
+----------------
+Research Findings on Quantum Computing and Cryptography:
+
+### Search Summary
+Found 5 relevant sources on quantum computing and cryptography.
+
+### Detailed Sources
+### Source 1
+- **URL**: [Quantum Computing's Impact on Cryptography — The Future of ...](https://medium.com/@RocketMeUpCybersecurity/quantum-computings-impact-on-cryptography-the-future-of-encryption-1f8804205d86)
+- **Date**: Not specified
+- **Summary**: No summary available
+### Source 2
+- **URL**: [Quantum Computing's Impact on Cryptography - Cryptomathic](https://www.cryptomathic.com/blog/quantum-computing-and-its-impact-on-cryptography)
+- **Date**: Not specified
+- **Summary**: No summary available
+### Source 3
+- **URL**: [Quantum's Impact on Cybersecurity - Viva Technology](https://vivatechnology.com/news/quantum-s-impact-on-cybersecurity)
+- **Date**: Not specified
+- **Summary**: No summary available
+### Source 4
+- **URL**: [Quantum Computing and its impact on Cryptography - Jade Global](https://www.jadeglobal.com/blog/quantum-computing-and-its-impact-cryptography)
+- **Date**: Not specified
+- **Summary**: No summary available
+### Source 5
+- **URL**: [The new math: Solving cryptography in an age of quantum - Deloitte](https://www2.deloitte.com/us/en/insights/focus/tech-trends/2025/tech-trends-quantum-computing-and-cybersecurity.html)
+- **Date**: Not specified
+- **Summary**: No summary available
+
+
+### Research Context
+These sources discuss various aspects of quantum computing developments and their implications for cryptography. 
+The research covers:
+- Technical breakthroughs in quantum computing
+- Security implications for current cryptographic systems
+- Future outlook and potential impacts
+- Industry responses and mitigation strategies
+
+Analysis:
+---------
+### Key Findings
+- Significant progress has been made in quantum computing in recent years, with companies like Google, IBM, and Honeywell building increasingly powerful quantum computers
+- In 2019, Google claimed to achieve "quantum supremacy" with a 53-qubit processor called Sycamore that solved a problem in 200 seconds that would take a classical supercomputer 10,000 years [^1]
+- Current quantum computers are still prone to errors and not yet practical for most applications, but the technology is rapidly advancing [^2]
+- Quantum computers pose a major threat to current cryptographic systems, as they can theoretically break many widely-used encryption algorithms like RSA and elliptic curve cryptography (ECC) [^3]
+- NIST estimates that a quantum computer capable of breaking 2048-bit RSA encryption could be built by 2030 [^4]
+
+### Emerging Trends 
+- Tech giants and governments are heavily investing in quantum computing R&D
+- Focus is shifting from proving quantum supremacy to developing practical, fault-tolerant quantum computers [^1]
+- Increasing interest in post-quantum cryptography (PQC) to develop quantum-resistant encryption methods
+- NIST is currently leading a standardization process for PQC algorithms, with the goal of selecting a new suite of cryptographic standards by 2024 [^4]
+
+### Technical Implications
+- Many current public-key cryptographic algorithms used for secure communication, digital signatures, etc. will become vulnerable to quantum attacks
+- Symmetric key algorithms like AES are less impacted but will require doubled key sizes (e.g. from 128-bit to 256-bit) [^3]  
+- Migration to post-quantum algorithms will require significant effort to upgrade protocols, software, and hardware
+- Challenges include algorithm efficiency, compatibility with existing systems, and ensuring trust in new standards
+
+### Business Impact
+- Sectors that rely heavily on cryptography, such as finance, healthcare, government, and critical infrastructure face the greatest risks
+- Stolen encrypted data could be stored now and decrypted once quantum computers become available, known as "harvest now, decrypt later" attacks [^5]
+- Opportunities for quantum computing in optimization, machine learning, drug discovery, and more could drive major industry disruptions
+- Potential for major security breaches and loss of sensitive data if quantum-vulnerable systems are not upgraded in time
+
+### Future Outlook
+- Rapid advancement of quantum computing makes it difficult to predict exact timelines, but estimates range from 5-20 years before cryptographically relevant quantum computers exist [^4]
+- Hybrid quantum/classical algorithms and quantum-inspired approaches on classical hardware may provide some benefits in the nearer-term 
+- Geopolitical tensions could accelerate quantum computing development as nations vie for technological supremacy
+- Ongoing research into quantum-safe cryptographic solutions and standards will be critical to ensuring a smooth transition
+
+### Recommendations
+- Organizations should assess their cryptographic dependencies and develop quantum risk management strategies
+- Begin testing and implementing post-quantum cryptography in phases, prioritizing high-value assets and data with long-term sensitivity
+- Adopt crypto-agility best practices to enable rapid switching of algorithms and key sizes as standards evolve
+- Invest in quantum literacy for technical staff and decision-makers 
+- Monitor NIST's PQC standardization process and plan to adopt final selections
+- Consider potential opportunities enabled by quantum computing in addition to focusing on risk mitigation
+
+[^1]: https://medium.com/@RocketMeUpCybersecurity/quantum-computings-impact-on-cryptography-the-future-of-encryption-1f8804205d86
+[^2]: https://www.cryptomathic.com/blog/quantum-computing-and-its-impact-on-cryptography  
+[^3]: https://vivatechnology.com/news/quantum-s-impact-on-cybersecurity
+[^4]: https://www2.deloitte.com/us/en/insights/focus/tech-trends/2025/tech-trends-quantum-computing-and-cybersecurity.html
+[^5]: https://www.jadeglobal.com/blog/quantum-computing-and-its-impact-cryptography
+

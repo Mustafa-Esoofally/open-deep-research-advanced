@@ -46,8 +46,7 @@ reference/
 package-lock.json
 backend/venv/
 **/__pycache__/**
+.venv/
 
 # windsurf rules
 .windsurfrules
-src/venv/
-venv/
