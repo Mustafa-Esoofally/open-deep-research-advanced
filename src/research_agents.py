@@ -1,22 +1,35 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from langchain_openai import ChatOpenAI
-from langchain.agents import AgentExecutor, Tool, create_openai_functions_agent
-from langchain.agents.format_scratchpad import format_to_openai_functions
-from langchain.agents.output_parsers import OpenAIFunctionsAgentOutputParser
+from langchain.agents import AgentExecutor, Tool, create_openai_tools_agent
 from langchain.tools import Tool
 from langchain.memory import ConversationBufferMemory
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.schema.runnable import RunnablePassthrough, RunnableSequence
 from langchain.schema.messages import AIMessage, HumanMessage, SystemMessage
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import requests
 import os
-import asyncio
 import json
 import traceback
 from firecrawl import FirecrawlApp
 from datetime import datetime
 import logging
+from dataclasses import dataclass
+from typing import List, Optional
+
+@dataclass
+class ResearchContext:
+    query: str
+    depth: int
+    breadth: int
+    current_depth: int = 0
+    learnings: List[str] = None
+    directions: List[str] = None
+    sources: List[str] = None
+
+    def __post_init__(self):
+        self.learnings = self.learnings or []
+        self.directions = self.directions or []
+        self.sources = self.sources or []
 
 class ResearchAgents:
     def __init__(self, llm: ChatOpenAI):
@@ -29,10 +42,10 @@ class ResearchAgents:
         )
         # Setup logging
         self.setup_logging()
-        self.agent_chain = []  # Store agent reasoning chain
         self.tools = self._initialize_tools()
         self.research_chain = self._create_research_chain()
         self.analysis_chain = self._create_analysis_chain()
+        self.followup_chain = self._create_followup_chain()
 
     def setup_logging(self):
         """Setup logging configuration"""
@@ -51,101 +64,51 @@ class ResearchAgents:
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
-        self.log_file = log_file
-
-    def log_agent_step(self, phase: str, action: str, details: str, sub_step: str = None) -> None:
-        """Enhanced logging with sub-steps"""
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        step = {
-            "timestamp": timestamp,
-            "phase": phase,
-            "action": action,
-            "sub_step": sub_step,  # New field
-            "details": details
-        }
-        self.agent_chain.append(step)
-        self.logger.info(f"Agent Step - {phase}: {action}" + (f" ({sub_step})" if sub_step else ""))
-
-    def get_agent_chain(self) -> str:
-        """Get the agent reasoning chain in markdown format"""
-        if not self.agent_chain:
-            return "No agent reasoning steps recorded."
-            
-        chain_md = "## Agent Reasoning Chain\n\n"
-        for step in self.agent_chain:
-            chain_md += f"### {step['timestamp']} - {step['phase']}\n"
-            chain_md += f"**Action**: {step['action']}\n\n"
-            chain_md += f"**Details**: {step['details']}\n\n"
-            chain_md += "---\n\n"
-        return chain_md
 
     @retry(stop=stop_after_attempt(3),
            wait=wait_exponential(multiplier=1, min=2, max=10),
            retry=retry_if_exception_type((requests.Timeout, requests.ConnectionError)))
-    async def search_web(self, query: str) -> str:
-        """Search the web using Firecrawl"""
-        self.log_agent_step("Research", "Web Search", f"Executing search for query: {query}", "Pre-Search")
-        self.logger.info(f"Executing web search for query: {query}")
+    async def search_web(self, query: str, num_results: int = 10) -> str:
+        """Perform web search and extract relevant information"""
+        self.logger.info(f"Starting web search for query: {query}")
+        
         try:
             app = FirecrawlApp(os.getenv("FIRECRAWL_API_KEY"))
-            results = []
+            self.logger.info("FirecrawlApp initialized successfully")
             
-            # Handle API errors properly
             search_result = app.search(query, {
                 "pageOptions": {
-                    "num": 10  # Increased results since we're not scraping
+                    "num": num_results
                 }
             })
             
             if not search_result or 'error' in search_result:
                 error_msg = "Search failed: No results or API error"
-                self.log_agent_step("Research", "Search Error", error_msg, "Post-Search")
                 self.logger.error(error_msg)
                 return error_msg
             
-            self.logger.info(f"Found {len(search_result.get('data', []))} search results")
-            
-            for idx, result in enumerate(search_result.get('data', []), 1):
-                # Format the result with available metadata in markdown
-                formatted_result = f"""### Source {idx}
-- **URL**: [{result.get('title', 'No title')}]({result.get('url', '#')})
-- **Date**: {result.get('date', 'Not specified')}
+            # Format results
+            results = []
+            for result in search_result.get('data', []):
+                formatted_result = f"""### {result.get('title', 'No title')}
+- **URL**: {result.get('url', '#')}
 - **Summary**: {result.get('snippet', 'No summary available')}
 """
                 results.append(formatted_result)
-                self.logger.debug(f"Added result from {result.get('url', 'unknown source')}")
             
             if not results:
-                return "No relevant results could be extracted from the search."
-                
-            # Combine results with a summary in markdown format
-            final_result = f"""### Search Summary
-Found {len(results)} relevant sources on quantum computing and cryptography.
-
-### Detailed Sources
-{''.join(results)}
-
-### Research Context
-These sources discuss various aspects of quantum computing developments and their implications for cryptography. 
-The research covers:
-- Technical breakthroughs in quantum computing
-- Security implications for current cryptographic systems
-- Future outlook and potential impacts
-- Industry responses and mitigation strategies"""
+                return "No relevant results found."
             
-            self.log_agent_step("Research", "Search Complete", f"Found {len(results)} relevant sources", "Post-Search")
-            self.logger.info(f"Successfully completed web search with {len(results)} results")
-            return final_result
+            return "\n".join(results)
             
         except Exception as e:
             error_msg = f"Search error: {str(e)}"
-            self.log_agent_step("Research", "Search Error", error_msg, "Post-Search")
             self.logger.error(error_msg)
             self.logger.error(traceback.format_exc())
             return error_msg
 
     def _initialize_tools(self) -> List[Tool]:
-        """Initialize tools with retry mechanism"""
+        """Initialize search tool"""
         return [
             Tool(
                 name="web_search",
@@ -157,248 +120,223 @@ The research covers:
 
     def _create_research_chain(self) -> AgentExecutor:
         """Create the research chain"""
+        prompt = ChatPromptTemplate.from_messages([
+            SystemMessage(content="""You are a research assistant tasked with gathering and synthesizing information.
+            For the given research query and context, you should:
+            1. Use the web_search tool to find relevant information
+            2. Extract key details and insights from the search results
+            3. Organize findings in a clear structure with proper headings
+            4. Cite sources with URLs where possible
+            5. Identify potential directions for deeper research
+            
+            When you receive input, it will contain:
+            - Main Query: The primary research question
+            - Additional Context: Follow-up questions and their answers
+            
+            Focus on depth and quality rather than breadth. Each search should aim to uncover
+            meaningful insights rather than just surface-level information.
+            
+            Format your response in Markdown with clear sections and citations."""),
+            MessagesPlaceholder(variable_name="chat_history"),
+            HumanMessage(content="{input}"),
+            MessagesPlaceholder(variable_name="agent_scratchpad")
+        ])
+
+        agent = create_openai_tools_agent(
+            llm=self.llm,
+            tools=self.tools,
+            prompt=prompt
+        )
+
+        return AgentExecutor(
+            agent=agent,
+            tools=self.tools,
+            memory=self.memory,
+            verbose=True
+        )
+
+    def get_agent_chain(self) -> str:
+        """Get the agent's reasoning chain from memory"""
         try:
-            prompt = ChatPromptTemplate.from_messages([
-                SystemMessage(content="""You are an advanced research assistant specializing in gathering and synthesizing information.
-Your task is to analyze the provided search results and create a comprehensive research report.
-
-You have access to a web_search tool that you can use to gather additional information if needed.
-
-Follow these steps:
-1. Review the initial search results thoroughly
-2. Identify any gaps in the information
-3. Use the web_search tool to gather additional information if needed
-4. Synthesize all findings into a clear, structured report
-5. Include specific details, statistics, and examples
-6. Cite sources for all information
-
-Your report should:
-- Present information in a logical sequence
-- Highlight key findings and breakthroughs
-- Note any conflicting information or uncertainties
-- Include relevant statistics and data points
-- Provide proper attribution for sources"""),
-                MessagesPlaceholder(variable_name="chat_history"),
-                HumanMessage(content="{input}"),
-                MessagesPlaceholder(variable_name="agent_scratchpad")
-            ])
-
-            agent = create_openai_functions_agent(self.llm, self.tools, prompt)
-
-            return AgentExecutor(
-                agent=agent,
-                tools=self.tools,
-                memory=self.memory,
-                verbose=True,
-                handle_parsing_errors=True,
-                max_iterations=5,
-                early_stopping_method="force"
-            )
+            # Extract messages from memory
+            messages = self.memory.chat_memory.messages
+            
+            # Format the reasoning chain
+            chain = []
+            for msg in messages:
+                if isinstance(msg, HumanMessage):
+                    chain.append(f"## User Query\n{msg.content}\n")
+                elif isinstance(msg, AIMessage):
+                    chain.append(f"## Agent Response\n{msg.content}\n")
+                elif isinstance(msg, SystemMessage):
+                    chain.append(f"## System Message\n{msg.content}\n")
+            
+            return "\n".join(chain)
+            
         except Exception as e:
-            print(f"Error creating research chain: {str(e)}")
-            print(traceback.format_exc())
-            raise
+            self.logger.error(f"Error getting agent chain: {str(e)}")
+            return "Error: Could not retrieve agent reasoning chain"
 
     def _create_analysis_chain(self) -> AgentExecutor:
         """Create the analysis chain"""
+        prompt = ChatPromptTemplate.from_messages([
+            SystemMessage(content="""You are an analysis assistant tasked with analyzing research findings.
+            When given research results, you should:
+            1. Identify key insights and patterns
+            2. Evaluate the significance of findings
+            3. Draw meaningful conclusions
+            4. Provide actionable recommendations
+            5. Note any limitations or areas needing further research
+            
+            Format your response in clear sections:
+            - Key Insights
+            - Significance
+            - Conclusions
+            - Recommendations
+            - Limitations
+            
+            Use Markdown formatting for better readability."""),
+            MessagesPlaceholder(variable_name="chat_history"),
+            HumanMessage(content="{input}"),
+            MessagesPlaceholder(variable_name="agent_scratchpad")
+        ])
+
+        agent = create_openai_tools_agent(
+            llm=self.llm,
+            tools=self.tools,
+            prompt=prompt
+        )
+
+        return AgentExecutor(
+            agent=agent,
+            tools=self.tools,
+            memory=self.memory,
+            verbose=True
+        )
+
+    def _create_followup_chain(self) -> ChatPromptTemplate:
+        """Create the followup questions chain"""
+        return ChatPromptTemplate.from_messages([
+            SystemMessage(content="""You are a research assistant tasked with generating follow-up questions.
+            Your goal is to ask clarifying questions that will help focus and guide the research.
+            Questions should be:
+            1. Clear and specific
+            2. Directly related to the research topic
+            3. Aimed at understanding user's research goals
+            4. Brief and to the point
+            
+            Return only the questions, without any additional text or explanations.""")
+        ])
+
+    async def generate_followup_questions(self, context: ResearchContext) -> List[str]:
+        """Generate follow-up questions based on the initial query"""
         try:
-            prompt = ChatPromptTemplate.from_messages([
-                SystemMessage(content="""You are an expert analyst who excels at synthesizing research findings into clear, actionable insights.
-Your task is to analyze the provided research data and create a comprehensive analysis report in markdown format.
-
-Follow these guidelines:
-1. Carefully review all research data and sources provided
-2. Identify key themes, patterns, and trends
-3. Evaluate the credibility and relevance of information
-4. Note any conflicting information or areas of uncertainty
-5. Consider implications across different domains
-6. Provide specific, actionable recommendations
-
-Structure your analysis with the following markdown sections:
-
-### Key Findings
-- Most significant discoveries and developments
-- Critical facts and statistics
-- Important breakthroughs or changes
-
-### Emerging Trends
-- Current directions and patterns
-- Evolving technologies or approaches
-- Shifting paradigms or perspectives
-
-### Technical Implications
-- Impact on existing systems and technologies
-- Technical challenges and solutions
-- Required adaptations or changes
-
-### Business Impact
-- Effects on industries and organizations
-- Economic considerations
-- Market opportunities and risks
-
-### Future Outlook
-- Predicted developments and timelines
-- Potential scenarios and their likelihood
-- Areas requiring further research or attention
-
-### Recommendations
-- Specific, actionable steps
-- Priority areas for focus
-- Risk mitigation strategies
-
-Remember to:
-- Use proper markdown formatting (headers, lists, emphasis)
-- Support conclusions with evidence from the research
-- Highlight uncertainties or limitations in the analysis
-- Consider multiple perspectives and scenarios
-- Focus on practical, actionable insights"""),
-                MessagesPlaceholder(variable_name="chat_history"),
-                HumanMessage(content="""Please analyze the following research data and provide a comprehensive analysis in markdown format:
-
-Research Data:
-{input}"""),
-                MessagesPlaceholder(variable_name="agent_scratchpad")
-            ])
-
-            agent = create_openai_functions_agent(self.llm, [], prompt)
-
-            return AgentExecutor(
-                agent=agent,
-                tools=[],  # Analysis chain doesn't need tools
-                memory=self.memory,
-                verbose=True,
-                handle_parsing_errors=True
-            )
+            # Create a focused input for question generation
+            input_text = f"Given this research query, generate {context.breadth} focused follow-up questions to clarify the research direction: {context.query}"
+            
+            # Direct LLM call without agent overhead
+            messages = self.followup_chain.format_messages(human_message=input_text)
+            result = await self.llm.ainvoke(messages)
+            
+            # Extract and clean questions
+            questions = [q.strip() for q in result.content.split('\n') if q.strip() and '?' in q]
+            return questions[:context.breadth]
+            
         except Exception as e:
-            print(f"Error creating analysis chain: {str(e)}")
-            print(traceback.format_exc())
+            self.logger.error(f"Error generating follow-up questions: {str(e)}")
+            return [
+                f"What specific aspects of {context.query} are you most interested in?",
+                f"What is your primary goal in researching {context.query}?",
+                f"Are there any particular applications or use cases you want to focus on?"
+            ]
+
+    async def research_iteration(self, context: ResearchContext) -> Tuple[List[str], List[str]]:
+        """Perform one iteration of research"""
+        try:
+            # Generate search queries based on context
+            queries = [context.query]
+            if context.current_depth > 0:
+                followup_questions = await self.generate_followup_questions(context)
+                queries.extend(followup_questions)
+
+            # Limit queries by breadth parameter
+            queries = queries[:context.breadth]
+
+            # Perform research for each query
+            all_findings = []
+            all_directions = []
+            
+            for query in queries:
+                result = await self.research_chain.ainvoke({"input": query})
+                findings = result["output"]
+                all_findings.append(findings)
+                
+                # Extract potential new research directions
+                analysis = await self.analyze(findings)
+                directions = [d.strip() for d in analysis.split("\n") if d.strip()]
+                all_directions.extend(directions)
+
+            return all_findings, all_directions
+
+        except Exception as e:
+            self.logger.error(f"Research iteration error: {str(e)}")
+            return [], []
+
+    async def deep_research(self, query: str, depth: int = 2, breadth: int = 4) -> ResearchContext:
+        """Perform deep research with iterative exploration"""
+        context = ResearchContext(query=query, depth=depth, breadth=breadth)
+        
+        try:
+            while context.current_depth < context.depth:
+                self.logger.info(f"Starting research iteration at depth {context.current_depth}")
+                
+                # Perform research iteration
+                findings, directions = await self.research_iteration(context)
+                
+                # Update context with new findings
+                context.learnings.extend(findings)
+                context.directions.extend(directions)
+                context.current_depth += 1
+                
+                self.logger.info(f"Completed research iteration {context.current_depth}")
+                
+            return context
+            
+        except Exception as e:
+            self.logger.error(f"Deep research error: {str(e)}")
             raise
 
-    async def research(self, query: str) -> str:
-        """Modified research method with enhanced logging"""
-        self.log_agent_step("Research", "Start", f"Beginning research for query: {query}", "Init")
+    async def research(self, query: str, depth: int = 2, breadth: int = 4) -> str:
+        """Enhanced research method with depth and breadth parameters"""
         try:
-            # Add source validation step
-            self.log_agent_step("Research", "Validation", "Validating search parameters", "Pre-Search")
+            context = await self.deep_research(query, depth, breadth)
             
-            search_results = await self.search_web(query)
-            
-            # Add results validation
-            self.log_agent_step("Research", "Validation", "Assessing result quality", "Post-Search")
-            
-            # Add information synthesis tracking
-            self.log_agent_step("Research", "Analysis", "Processing search results", "Synthesis")
-            self.log_agent_step("Research", "Analysis", "Identifying information gaps", "Gap Analysis")
-            
-            chain_input = {
-                "input": f"""Research Query: {query}
+            # Compile final research output
+            output = f"""# Research Findings
 
-# Enhanced Prompt
-Initial Search Results:
-{search_results}
+## Original Query
+{context.query}
 
-Based on these search results and using the web_search tool for any additional information needed, 
-please provide a comprehensive research report that:
-1. Synthesizes the key information from all sources
-2. Identifies and fills any information gaps
-3. Presents findings in a clear, structured format
-4. Includes specific details, statistics, and examples
-5. Cites sources appropriately
+## Key Learnings
+{chr(10).join(context.learnings)}
 
-Focus on providing a thorough understanding of the latest developments in quantum computing 
-and their implications for cryptography."""
-            }
-            
-            result = await self.research_chain.ainvoke(chain_input)
-            
-            # Extract the actual research content
-            research_output = result["output"]
-            if isinstance(research_output, str) and research_output.startswith("Thank you for the instructions"):
-                self.log_agent_step("Research", "Fallback", "Using direct search results due to processing limitation", "Post-Synthesis")
-                research_output = f"""Research Findings on Quantum Computing and Cryptography:
+## Research Directions
+{chr(10).join(context.directions)}
 
-{search_results}"""
-            else:
-                self.log_agent_step("Research", "Complete", "Successfully synthesized research findings", "Post-Synthesis")
+## Sources
+{chr(10).join(context.sources)}
+"""
+            return output
             
-            return research_output
         except Exception as e:
-            error_msg = f"Error in research phase: {str(e)}"
-            self.log_agent_step("Research", "Error", error_msg, "Post-Synthesis")
-            self.logger.error(error_msg)
-            self.logger.error(traceback.format_exc())
+            self.logger.error(f"Research error: {str(e)}")
             raise
 
     async def analyze(self, research_data: str) -> str:
-        """Enhanced analysis method with reasoning steps"""
-        self.log_agent_step("Analysis", "Start", "Beginning analysis", "Init")
+        """Analyze research findings"""
         try:
-            # Add validation step
-            self.log_agent_step("Analysis", "Validation", "Checking data integrity", "Pre-Analysis")
-            
-            # Add structured reasoning steps
-            self.log_agent_step("Analysis", "Processing", "Identifying key trends", "Pattern Recognition")
-            self.log_agent_step("Analysis", "Processing", "Evaluating evidence quality", "Source Critique")
-            self.log_agent_step("Analysis", "Processing", "Projecting implications", "Impact Forecasting")
-            
-            analysis_input = {
-                "input": f"""# Enhanced Analysis Prompt
-{research_data}
-
-Based on the provided research data, create a comprehensive analysis that:
-1. Identifies key findings and breakthroughs in quantum computing
-2. Analyzes emerging trends in the field
-3. Evaluates technical implications for cryptography
-4. Assesses business impacts across industries
-5. Projects future developments and timelines
-6. Provides actionable recommendations
-
-Your analysis should be thorough, well-structured, and supported by the research data.
-Focus on practical implications and actionable insights."""
-            }
-            
-            result = await self.analysis_chain.ainvoke(analysis_input)
-            
-            # Verify the analysis output
-            analysis_output = result["output"]
-            if not analysis_output or analysis_output.startswith("Thank you for"):
-                self.log_agent_step("Analysis", "Fallback", "Generating structured analysis from research data")
-                # Generate a basic structured analysis
-                analysis_output = f"""### Key Findings
-- Based on the research sources, quantum computing poses significant challenges to current cryptographic systems
-- Major tech companies and governments are investing heavily in quantum computing research
-- Post-quantum cryptography standards are being developed to address future threats
-
-### Emerging Trends
-- Development of quantum-resistant cryptographic algorithms
-- Growing focus on quantum computing hardware improvements
-- Increasing awareness of quantum threats to cybersecurity
-
-### Technical Implications
-- Current public-key cryptography will be vulnerable to quantum attacks
-- Need for new quantum-resistant cryptographic standards
-- Challenges in implementing post-quantum cryptography
-
-### Business Impact
-- Organizations need to prepare for post-quantum cryptography transition
-- Significant costs associated with upgrading cryptographic systems
-- Opportunities for quantum-safe security solutions
-
-### Future Outlook
-- Quantum computers capable of breaking current encryption expected within 10-15 years
-- Standardization of post-quantum cryptography ongoing
-- Hybrid classical-quantum systems likely in the near term
-
-### Recommendations
-- Assess cryptographic vulnerabilities to quantum attacks
-- Plan for transition to quantum-resistant algorithms
-- Monitor developments in quantum computing and post-quantum cryptography"""
-            
-            self.log_agent_step("Analysis", "Complete", "Successfully generated comprehensive analysis")
-            return analysis_output
+            result = await self.analysis_chain.ainvoke({"input": research_data})
+            return result["output"]
         except Exception as e:
-            error_msg = f"Error in analysis phase: {str(e)}"
-            self.log_agent_step("Analysis", "Error", error_msg)
-            self.logger.error(error_msg)
-            self.logger.error(traceback.format_exc())
+            self.logger.error(f"Analysis error: {str(e)}")
             raise

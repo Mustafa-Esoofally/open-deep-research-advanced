@@ -50,3 +50,5 @@ backend/venv/
 
 # windsurf rules
 .windsurfrules
+venv/
+src/logs/
