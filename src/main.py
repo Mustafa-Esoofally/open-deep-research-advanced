@@ -9,6 +9,9 @@ import sys
 from datetime import datetime
 import logging
 import traceback
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 # Initialize environment variables
 print("Loading environment variables...")
@@ -17,6 +20,18 @@ load_dotenv()
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Create FastAPI app
+app = FastAPI()
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Create necessary directories
 os.makedirs('reports', exist_ok=True)
@@ -32,12 +47,44 @@ if os.getenv("LANGSMITH_API_KEY"):
     print("Initializing LangSmith client...")
     client = Client()
 
+class ChatRequest(BaseModel):
+    message: str
+
 class ResearchState(TypedDict):
     query: str
     depth: int
     breadth: int
     research_data: List[str]
     analysis: str
+
+# Initialize research agents at startup
+research_agents = None
+
+@app.on_event("startup")
+async def startup_event():
+    global research_agents
+    research_agents = await create_research_workflow()
+
+@app.post("/chat")
+async def chat(request: ChatRequest):
+    try:
+        # Process the research query
+        depth = 2  # Default depth
+        breadth = 4  # Default breadth
+        
+        # Execute research phase
+        research_result = await research_agents.research(request.message, depth=depth, breadth=breadth)
+        
+        # Execute analysis phase
+        analysis_result = await research_agents.analyze(research_result)
+        
+        # Combine results into a response
+        response = f"Research Results:\n{research_result}\n\nAnalysis:\n{analysis_result}"
+        
+        return {"response": response}
+    except Exception as e:
+        logger.error(f"Error in chat endpoint: {str(e)}")
+        return {"error": "Failed to process request"}, 500
 
 async def create_research_workflow() -> ResearchAgents:
     print("Creating research workflow...")
@@ -147,10 +194,9 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        print("Running asyncio main...")
-        asyncio.run(main())
-        print("Asyncio main completed successfully")
+        import uvicorn
+        print("Starting FastAPI server...")
+        uvicorn.run(app, host="0.0.0.0", port=8000)
     except Exception as e:
-        print(f"Error in main: {str(e)}", file=sys.stderr)
-        import traceback
-        print(traceback.format_exc())
+        print(f"Error starting server: {str(e)}", file=sys.stderr)
+        traceback.print_exc()
