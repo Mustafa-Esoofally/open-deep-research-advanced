@@ -1,6 +1,6 @@
 import { ChatPromptTemplate } from '@langchain/core/prompts';
 import axios from 'axios';
-import { openRouterClient, firecrawlApiKey, firecrawlBaseUrl, firecrawlRequestTimeout, defaultFirecrawlOptions, firecrawlHeaders } from '../clients';
+import { openRouterAdapter, firecrawlApiKey, firecrawlBaseUrl, firecrawlRequestTimeout, defaultFirecrawlOptions, firecrawlHeaders } from '../clients';
 
 // Types
 export interface ResearchResult {
@@ -354,7 +354,7 @@ Begin by clearly stating that this report is based on your knowledge as of your 
     const prompt = ChatPromptTemplate.fromTemplate(systemPrompt);
 
     try {
-      const response = await prompt.pipe(openRouterClient).invoke({
+      const response = await prompt.pipe(openRouterAdapter).invoke({
         query,
         searchResults
       });
