@@ -1,8 +1,12 @@
 import { NextRequest } from 'next/server';
-import { LangChainAgent } from '@/app/lib/models/research-agent';
+import { UnifiedResearchAgent } from '@/app/lib/models/unified-research-agent';
+import { refreshEnv } from '@/app/lib/env';
+
+// Force environment refresh at the start of each API call
+refreshEnv();
 
 export async function POST(req: NextRequest) {
-  const { query } = await req.json();
+  const { query, options = { isDeepResearch: false, depth: 2, breadth: 3 } } = await req.json();
 
   const encoder = new TextEncoder();
   const stream = new TransformStream();
@@ -12,23 +16,42 @@ export async function POST(req: NextRequest) {
   (async () => {
     try {
       // Initialize the agent with a progress callback
-      const agent = new LangChainAgent({
-        progressCallback: (progress, status) => {
+      const agent = new UnifiedResearchAgent({
+        progressCallback: (progress) => {
           // Stream progress updates to the client
-          writer.write(
-            encoder.encode(
-              JSON.stringify({
+          const progressUpdate = options.isDeepResearch 
+            ? JSON.stringify({
                 type: 'progress',
-                progress,
-                status,
-              }) + '\n'
-            )
-          );
+                progress: progress.progress || 0,
+                status: progress.status || `Researching depth ${progress.currentDepth}/${progress.totalDepth}`,
+                details: {
+                  depth: {
+                    current: progress.currentDepth,
+                    total: progress.totalDepth
+                  },
+                  breadth: {
+                    current: progress.currentBreadth,
+                    total: progress.totalBreadth
+                  },
+                  queries: {
+                    current: progress.completedQueries,
+                    total: progress.totalQueries,
+                    currentQuery: progress.currentQuery
+                  }
+                }
+              })
+            : JSON.stringify({
+                type: 'progress',
+                progress: progress.progress || 0,
+                status: progress.status || 'Researching...'
+              });
+          
+          writer.write(encoder.encode(progressUpdate + '\n'));
         }
       });
 
       // Process the query and stream the results
-      for await (const chunk of agent.processQueryStream(query)) {
+      for await (const chunk of agent.processQueryStream(query, options)) {
         await writer.write(encoder.encode(chunk));
       }
     } catch (error) {
@@ -36,7 +59,7 @@ export async function POST(req: NextRequest) {
       await writer.write(
         encoder.encode(
           JSON.stringify({
-            type: 'content',
+            type: 'error',
             content: 'An error occurred during research. Please try again with a more specific query.',
           }) + '\n'
         )
