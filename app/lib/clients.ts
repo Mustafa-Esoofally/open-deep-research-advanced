@@ -70,107 +70,253 @@ class CustomOpenRouterClient {
       const currentApiKey = this.refreshApiKey();
       
       // Get the model from options or environment 
-      const model = options.model || OPENROUTER_MODEL;
+      let model = options.model || OPENROUTER_MODEL;
       
-      console.log('Calling OpenRouter with model:', model);
+      // Initialize providerRouting as undefined
+      let providerRouting: any = undefined;
       
-      // Verify API key is available before making the request
-      if (!currentApiKey || currentApiKey.trim() === '') {
-        console.error('ERROR: No OpenRouter API key found. Please set NEXT_SERVER_OPENROUTER_API_KEY in your environment variables.');
-        throw new Error('OpenRouter API key is not set');
+      // Configure provider routing for specific models
+      if (model === 'deepseek/deepseek-r1-distill-llama-70b' || model === 'deepseek-distill-70b') {
+        providerRouting = {
+          order: ['Groq'],
+          allow_fallbacks: false
+        };
+        // Only log this in development mode
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`Routing DeepSeek model to Groq provider`);
+        }
       }
       
-      // Debug log (first few characters only for security)
-      console.log('OpenRouter API Key status:', 'API key is set (first 5 chars: ' + currentApiKey.substring(0, 5) + '...)');
-
-      // Add request timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
-      
-      try {
-        const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${currentApiKey}`,
-            'HTTP-Referer': APP_URL,
-            'X-Title': APP_NAME
-          },
-          body: JSON.stringify({
-            model: model,
-            messages: messages,
-            temperature: OPENROUTER_TEMPERATURE,
-            max_tokens: OPENROUTER_MAX_TOKENS
-          }),
-          signal: controller.signal
-        });
-        
-        clearTimeout(timeoutId);
-  
-        if (!response.ok) {
-          const errorText = await response.text();
-          let errorData;
-          try {
-            errorData = JSON.parse(errorText);
-          } catch {
-            errorData = errorText;
-          }
-          
-          console.error('OpenRouter API error:', response.status, errorData);
-          
-          // Handle special case: if authentication fails, try refreshing the API key
-          if (response.status === 401) {
-            console.log('Authentication failed. Trying to refresh API key...');
-            const freshEnv = refreshEnv();
-            this.apiKey = freshEnv.OPENROUTER_API_KEY;
-            console.error(`OpenRouter authentication failed. Please check your API key.`);
+      // If the model looks like a model key (not a full ID with provider prefix),
+      // try to get the full ID from the registry
+      if (model && !model.includes('/')) {
+        try {
+          // Dynamically import to avoid circular dependencies
+          const { modelRegistry } = await import('./models/providers');
+          const fullModelId = modelRegistry.getModelId(model);
+          if (fullModelId) {
+            model = fullModelId;
             
-            // Log the actual API key length for debugging (no sensitive content)
-            console.log(`API key length: ${this.apiKey?.length || 0}`);
-            console.log(`API key first 5 chars: ${this.apiKey?.substring(0, 5) || 'N/A'}`);
-            
-            // If in development, provide a helpful error message
-            if (runtimeEnv.NODE_ENV === 'development') {
-              console.error(`
-==========================================================
-🔑 API KEY ERROR TROUBLESHOOTING:
-1. Ensure NEXT_SERVER_OPENROUTER_API_KEY is set in .env.local
-2. Restart the development server completely
-3. Check that your OpenRouter account is active
-4. Verify the API key hasn't expired
-==========================================================
-              `);
+            // Get the model config for additional info (only needed for specific debug scenarios)
+            const modelConfig = modelRegistry.getModelConfig(model);
+            if (modelConfig && modelConfig.provider && process.env.NODE_ENV === 'development') {
+              console.log(`Using: ${modelConfig.name} (${modelConfig.provider})`);
             }
           }
+        } catch (error) {
+          // Only log the essential error information
+          console.warn('Failed to convert model key to ID');
+        }
+      }
+      
+      // Only log in development mode
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Calling OpenRouter with model:', model);
+      }
+      
+      // Verify API key is available before making the request
+      if (!currentApiKey) {
+        console.error('ERROR: No OpenRouter API key found. Please set NEXT_SERVER_OPENROUTER_API_KEY in your environment variables.');
+        throw new Error('OpenRouter API key is missing');
+      }
+      
+      // Log key status only in development mode
+      if (process.env.NODE_ENV === 'development') {
+        console.log('OpenRouter API Key status:', 'API key is set');
+      }
+      
+      // New improved response format in OpenRouter
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${currentApiKey}`,
+          'HTTP-Referer': 'https://advanced-deep-research.vercel.app/',
+          'X-Title': 'Advanced Deep Research',
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: messages,
+          provider_routing: providerRouting,
+          route: 'fallback', // Use fallback route for reduced latency
+        }),
+      });
+      
+      // Check if the response is unauthorized (401)
+      if (response.status === 401) {
+        const errorData = await response.text();
+        console.error('OpenRouter API error: Authentication failed');
+        
+        // Try to refresh the API key
+        console.log('Authentication failed. Trying to refresh API key...');
+        
+        // If refreshing also fails, provide a clear error
+        console.error(`OpenRouter authentication failed. Please check your API key.`);
+        
+        // Include just enough debugging information to diagnose the issue
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`API key length: ${this.apiKey?.length || 0}`);
+          console.log(`API key first 5 chars: ${this.apiKey?.substring(0, 5) || 'N/A'}`);
+        }
+        
+        throw new Error('Authentication failed with OpenRouter API. Please check your API key.');
+      }
+      
+      // Handle other errors
+      if (!response.ok) {
+        const errorData = await response.text();
+        console.error('OpenRouter API error:', response.status, errorData);
+        throw new Error(`OpenRouter API error: ${response.status} - ${errorData}`);
+      }
+      
+      // Parse the response
+      const data = await response.json();
+      
+      // Validate the response format
+      if (!data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
+        console.error('Invalid response format from OpenRouter');
+        throw new Error('Invalid response format from OpenRouter');
+      }
+      
+      const firstChoice = data.choices[0];
+      if (!firstChoice.message || !firstChoice.message.content) {
+        console.error('Missing message content in OpenRouter response');
+        throw new Error('Missing message content in OpenRouter response');
+      }
+      
+      return firstChoice.message.content;
+    } catch (error) {
+      // Log the error but don't include the full error object
+      console.error('OpenRouter processing error:', error instanceof Error ? error.message : 'Unknown error');
+      throw error; // Re-throw to allow callers to handle it
+    }
+  }
+
+  /**
+   * Stream a chat completion response from OpenRouter
+   * @param messages Array of chat messages
+   * @param options Options including model selection
+   * @returns An async generator that yields content chunks
+   */
+  async *streamChat(messages: Array<{ role: string; content: string }>, options: { model?: string } = {}): AsyncGenerator<string> {
+    try {
+      // Always use the latest API key
+      const currentApiKey = this.refreshApiKey();
+      
+      // Get the model from options or environment 
+      let model = options.model || OPENROUTER_MODEL;
+      
+      // Initialize providerRouting as undefined
+      let providerRouting: any = undefined;
+      
+      // Configure provider routing for specific models
+      if (model === 'deepseek/deepseek-r1-distill-llama-70b' || model === 'deepseek-distill-70b') {
+        providerRouting = {
+          order: ['Groq'],
+          allow_fallbacks: false
+        };
+        // Only log this in development mode
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`Routing DeepSeek model to Groq provider for streaming`);
+        }
+      }
+      
+      // If the model looks like a model key (not a full ID with provider prefix),
+      // try to get the full ID from the registry
+      if (model && !model.includes('/')) {
+        try {
+          // Dynamically import to avoid circular dependencies
+          const { modelRegistry } = await import('./models/providers');
+          const fullModelId = modelRegistry.getModelId(model);
+          if (fullModelId) {
+            model = fullModelId;
+          }
+        } catch (error) {
+          console.warn('Failed to convert model key to ID for streaming');
+        }
+      }
+      
+      // Verify API key is available before making the request
+      if (!currentApiKey) {
+        console.error('ERROR: No OpenRouter API key found for streaming');
+        throw new Error('OpenRouter API key is missing');
+      }
+      
+      // Make the streaming request to OpenRouter
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${currentApiKey}`,
+          'HTTP-Referer': 'https://advanced-deep-research.vercel.app/',
+          'X-Title': 'Advanced Deep Research',
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: messages,
+          provider_routing: providerRouting,
+          route: 'fallback',
+          stream: true, // Enable streaming
+        }),
+      });
+      
+      // Handle API errors
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`OpenRouter streaming error: ${response.status}`, errorText);
+        throw new Error(`OpenRouter API error: ${response.status}`);
+      }
+      
+      // Process the stream
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder('utf-8');
+      
+      if (!reader) {
+        throw new Error('Failed to get reader from response');
+      }
+      
+      // Accumulate partial chunks if necessary
+      let buffer = '';
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        // Decode the chunk
+        const chunk = decoder.decode(value, { stream: true });
+        buffer += chunk;
+        
+        // Process each line (SSE format)
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep the last incomplete line in the buffer
+        
+        for (const line of lines) {
+          // Skip empty lines and keep-alive messages
+          if (!line.trim() || line === ':' || line === 'data: [DONE]') continue;
           
-          throw new Error(`OpenRouter API error: ${response.status} ${errorText}`);
+          try {
+            // Extract the data part from SSE format
+            const dataMatch = line.match(/^data: (.*)$/);
+            if (!dataMatch) continue;
+            
+            const data = JSON.parse(dataMatch[1]);
+            
+            // Skip incomplete or empty chunks
+            if (!data.choices || !data.choices[0] || !data.choices[0].delta) continue;
+            
+            // Extract content delta
+            const contentDelta = data.choices[0].delta.content;
+            if (contentDelta) {
+              yield contentDelta;
+            }
+          } catch (error) {
+            console.error('Error parsing streaming response chunk:', error);
+            // Continue to next line
+          }
         }
-  
-        const data = await response.json();
-        console.log('OpenRouter response received:', JSON.stringify(data, null, 2).substring(0, 500) + '...');
-        
-        // Safely access the response data with proper error handling
-        if (!data || !data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
-          console.error('Invalid response format from OpenRouter:', JSON.stringify(data, null, 2));
-          throw new Error('OpenRouter returned an empty or invalid response');
-        }
-        
-        // Ensure the first choice and its message exists
-        const firstChoice = data.choices[0];
-        if (!firstChoice || !firstChoice.message || !firstChoice.message.content) {
-          console.error('Missing message content in OpenRouter response:', JSON.stringify(firstChoice, null, 2));
-          throw new Error('OpenRouter response is missing message content');
-        }
-        
-        return firstChoice.message.content;
-      } finally {
-        clearTimeout(timeoutId);
       }
     } catch (error) {
-      console.error('OpenRouter processing error:', error);
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error('OpenRouter request timed out after 60 seconds');
-      }
+      console.error('OpenRouter streaming error:', error instanceof Error ? error.message : 'Unknown error');
       throw error;
     }
   }
@@ -189,6 +335,7 @@ export const openRouterAdapter = {
     return this;
   },
   
+  // This method processes the inputs and returns a result
   invoke: async ({ query, searchResults }: { query: string; searchResults: string }) => {
     try {
       // Format the prompt similar to what the LangChain version would do
@@ -228,8 +375,36 @@ Always cite your sources throughout the text using [Source: URL] format.`
       throw error;
     }
   },
-  pipe: function () {
+  
+  // Create a chainable pipe
+  pipe() {
     return this;
+  },
+
+  // These properties and methods are needed to implement the LangChain RunnableLike interface
+  lc_serializable: true,
+  lc_namespace: ["custom", "adapters"],
+  
+  withConfig() {
+    return this;
+  },
+  
+  withRetry() {
+    return this;
+  },
+  
+  batch() {
+    return [this];
+  },
+  
+  stream() {
+    return {
+      async *invoke(messages: Array<{ role: string; content: string }>) {
+        for await (const chunk of openRouterClient.streamChat(messages, { model: openRouterAdapter.model })) {
+          yield chunk;
+        }
+      }
+    };
   }
 };
 

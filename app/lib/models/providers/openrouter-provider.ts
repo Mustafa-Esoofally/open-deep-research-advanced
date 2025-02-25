@@ -1,20 +1,19 @@
 import { BaseModelProvider, ChatMessage, ModelProviderOptions, ModelResponse } from './base-provider';
 import { env, refreshEnv } from '../../env';
 
-// OpenRouter model IDs
-export enum OpenRouterModels {
-  O1 = 'openai/o1',
-  O1_MINI = 'openai/o1-mini',
-  DEEPSEEK_R1 = 'deepseek/deepseek-r1',
-  SONAR_REASONING = 'perplexity/sonar-reasoning',
-  AION_1_0 = 'aion-labs/aion-1.0',
-  CLAUDE_SONNET_3_7 = 'anthropic/claude-3.5-sonnet',
-}
-
 // Extended options for OpenRouter
 export interface OpenRouterOptions extends ModelProviderOptions {
   appName?: string;
   appUrl?: string;
+  providerRouting?: {
+    order?: string[];
+    allow_fallbacks?: boolean;
+    require_parameters?: boolean;
+    data_collection?: 'allow' | 'deny';
+    ignore?: string[];
+    quantizations?: string[];
+    sort?: 'price' | 'throughput' | 'latency';
+  };
 }
 
 export class OpenRouterProvider extends BaseModelProvider {
@@ -23,26 +22,24 @@ export class OpenRouterProvider extends BaseModelProvider {
   private baseUrl: string;
   private appName: string;
   private appUrl: string;
-
+  private providerRouting?: OpenRouterOptions['providerRouting'];
+  
   constructor(options: OpenRouterOptions) {
     super(options);
-    
-    // Initialize with values from options or environment
-    const runtimeEnv = refreshEnv();
     this.lastKeyRefresh = Date.now();
-    this.apiKey = options.apiKey || runtimeEnv.OPENROUTER_API_KEY;
-    this.baseUrl = options.baseUrl || 'https://openrouter.ai/api/v1';
-    this.appName = options.appName || runtimeEnv.APP_NAME || 'Advanced Deep Research';
-    this.appUrl = options.appUrl || runtimeEnv.APP_URL || 'http://localhost:3000';
     
-    // Validate critical configuration
-    if (!this.apiKey || this.apiKey.trim() === '') {
-      console.error('⚠️ ERROR: OpenRouter API key is not set.');
-      throw new Error('OpenRouter API key is not set');
+    // Get environment variables or use defaults
+    this.apiKey = options.apiKey || env.OPENROUTER_API_KEY;
+    this.baseUrl = options.baseUrl || env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
+    this.appName = options.appName || env.APP_NAME || 'Advanced Research App';
+    this.appUrl = options.appUrl || env.APP_URL || 'https://example.com';
+    this.providerRouting = options.providerRouting;
+    
+    if (!this.apiKey) {
+      console.warn('WARNING: OpenRouter API key not found. Set NEXT_SERVER_OPENROUTER_API_KEY in your .env.local file.');
     }
   }
-
-  // Function to refresh API keys if needed
+  
   private refreshApiKey() {
     // Check if it's been more than 5 minutes since last refresh
     const now = Date.now();
@@ -50,19 +47,15 @@ export class OpenRouterProvider extends BaseModelProvider {
       const freshEnv = refreshEnv();
       this.apiKey = freshEnv.OPENROUTER_API_KEY;
       this.lastKeyRefresh = now;
-      console.log('API key refreshed at', new Date(now).toISOString());
     }
     return this.apiKey;
   }
-
+  
   async chat(messages: ChatMessage[]): Promise<ModelResponse> {
     try {
       // Always use the latest API key
       const currentApiKey = this.refreshApiKey();
       
-      console.log('Calling OpenRouter with model:', this.options.modelId);
-      
-      // Verify API key is available before making the request
       if (!currentApiKey || currentApiKey.trim() === '') {
         console.error('ERROR: No OpenRouter API key found.');
         throw new Error('OpenRouter API key is not set');
@@ -70,7 +63,7 @@ export class OpenRouterProvider extends BaseModelProvider {
       
       // Add request timeout
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 120000); // 120 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
       
       try {
         const response = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -79,14 +72,18 @@ export class OpenRouterProvider extends BaseModelProvider {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${currentApiKey}`,
             'HTTP-Referer': this.appUrl,
-            'X-Title': this.appName,
-            ...this.options.headers,
+            'X-Title': this.appName
           },
           body: JSON.stringify({
             model: this.options.modelId,
-            messages: messages,
-            temperature: this.options.temperature,
-            max_tokens: this.options.maxTokens,
+            messages: messages.map(m => ({
+              role: m.role,
+              content: m.content
+            })),
+            temperature: this.options.temperature || 0.7,
+            max_tokens: this.options.maxTokens || 1000,
+            provider: this.providerRouting,
+            ...this.options
           }),
           signal: controller.signal
         });
@@ -95,51 +92,46 @@ export class OpenRouterProvider extends BaseModelProvider {
   
         if (!response.ok) {
           const errorText = await response.text();
-          let errorData;
-          try {
-            errorData = JSON.parse(errorText);
-          } catch {
-            errorData = errorText;
+          console.error('OpenRouter API error:', response.status, errorText);
+          
+          // Handle special case: if authentication fails, try refreshing the API key
+          if (response.status === 401) {
+            console.log('Authentication failed. Forcing refresh of API key...');
+            const freshEnv = refreshEnv();
+            this.apiKey = freshEnv.OPENROUTER_API_KEY;
           }
           
-          console.error('OpenRouter API error:', response.status, errorData);
           throw new Error(`OpenRouter API error: ${response.status} ${errorText}`);
         }
   
         const data = await response.json();
         
-        // Safely access the response data with proper error handling
+        // Extract response from model
         if (!data || !data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
-          console.error('Invalid response format from OpenRouter:', JSON.stringify(data, null, 2));
-          throw new Error('OpenRouter returned an empty or invalid response');
+          throw new Error('Invalid response from OpenRouter');
         }
         
-        // Ensure the first choice and its message exists
-        const firstChoice = data.choices[0];
-        if (!firstChoice || !firstChoice.message || !firstChoice.message.content) {
-          console.error('Missing message content in OpenRouter response:', JSON.stringify(firstChoice, null, 2));
-          throw new Error('OpenRouter response is missing message content');
+        const choice = data.choices[0];
+        
+        if (!choice || !choice.message || !choice.message.content) {
+          throw new Error('Missing content in OpenRouter response');
         }
         
-        // Extract usage information if available
-        const usage = data.usage ? {
-          promptTokens: data.usage.prompt_tokens,
-          completionTokens: data.usage.completion_tokens,
-          totalTokens: data.usage.total_tokens
-        } : undefined;
-
         return {
-          content: firstChoice.message.content,
-          usage,
-          raw: data
+          content: choice.message.content,
+          metadata: {
+            model: data.model || this.options.modelId,
+            usage: data.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+            raw: data
+          }
         };
       } finally {
         clearTimeout(timeoutId);
       }
     } catch (error) {
-      console.error('OpenRouter processing error:', error);
+      console.error('Error in OpenRouter provider:', error);
       if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error('OpenRouter request timed out after 120 seconds');
+        throw new Error('OpenRouter request timed out after 60 seconds');
       }
       throw error;
     }
@@ -147,9 +139,21 @@ export class OpenRouterProvider extends BaseModelProvider {
 }
 
 // Factory function to create providers for specific models
-export function createModelProvider(model: OpenRouterModels, options: Partial<OpenRouterOptions> = {}): OpenRouterProvider {
+export function createModelProvider(modelId: string, options: Partial<OpenRouterOptions> = {}): OpenRouterProvider {
+  // Set up Groq as the preferred provider for DeepSeek R1 Distill model
+  let providerRouting = options.providerRouting;
+  
+  if (modelId === 'deepseek/deepseek-r1-distill-llama-70b') {
+    providerRouting = {
+      order: ['Groq'],
+      allow_fallbacks: false,
+      ...providerRouting  // Preserve any user-specified routing options
+    };
+  }
+  
   return new OpenRouterProvider({
-    modelId: model,
+    modelId,
+    providerRouting,
     ...options
   });
 } 

@@ -1,9 +1,9 @@
+import './styles/globals.css';
 import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import { Toaster } from 'sonner';
 import { ThemeProvider } from '@/app/components/theme-provider';
 import { TooltipProvider } from '@/app/components/ui/tooltip';
-import '@/app/styles/globals.css';
 
 const inter = Inter({ 
   subsets: ['latin'],
@@ -22,8 +22,8 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: 'Advanced Deep Research',
-  description: 'AI-powered research assistant for deep analysis and comprehensive exploration of any topic',
+  title: 'Advanced Deep Research - Grok 3',
+  description: 'A powerful research assistant with deep reasoning capabilities',
   keywords: ['research', 'AI', 'deep research', 'analysis', 'knowledge exploration'],
   authors: [{ name: 'Advanced Deep Research Team' }],
   applicationName: 'Advanced Deep Research',
@@ -31,21 +31,35 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}) {
+}>) {
   return (
     <html lang="en" suppressHydrationWarning className={inter.variable}>
-      <body className={inter.className}>
+      <head />
+      <body className={`${inter.className} antialiased`}>
         <ThemeProvider
           attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
+          defaultTheme="dark"
+          enableSystem={false}
+          storageKey="deep-research-theme"
         >
           <TooltipProvider>
-            {children}
-            <Toaster position="top-center" closeButton richColors />
+            <div key="root-content-wrapper" id="main-content-container">
+              <Toaster 
+                position="bottom-right" 
+                closeButton 
+                theme="dark"
+                toastOptions={{
+                  style: {
+                    background: 'hsl(var(--background))',
+                    color: 'hsl(var(--foreground))',
+                    border: '1px solid hsl(var(--border))',
+                  },
+                }}
+              />
+              {children}
+            </div>
           </TooltipProvider>
         </ThemeProvider>
       </body>

@@ -43,13 +43,15 @@ function getApiKey(key: string, fallback: string = ''): string {
 
 // Available model options for validation
 const AVAILABLE_MODELS = [
-  'openai/o1',
-  'openai/o1-mini', 
-  'deepseek/deepseek-r1',
+  'deepseek/deepseek-r1:free',
+  'groq/deepseek-r1-distill-llama-70b',
   'perplexity/sonar-reasoning',
   'aion-labs/aion-1.0',
-  'anthropic/claude-3.5-sonnet',
+  'anthropic/claude-3.7-sonnet',
+  'google/gemini-2.0-flash-001',
   // Legacy options for backward compatibility
+  'openai/o1',
+  'openai/o1-mini', 
   'openai/o3-mini',
   'anthropic/claude-3-opus',
   'anthropic/claude-3-sonnet'
@@ -87,7 +89,8 @@ export function getEnv(forceRefresh: boolean = false) {
     OPENROUTER_MODEL: modelToUse,
     OPENROUTER_TEMPERATURE: parseFloat(process.env.OPENROUTER_TEMPERATURE || '0.7'),
     OPENROUTER_MAX_TOKENS: parseInt(process.env.OPENROUTER_MAX_TOKENS || '4000'),
-    DEFAULT_MODEL_KEY: process.env.DEFAULT_MODEL_KEY || 'o1-mini', // Key for the model registry
+    OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
+    DEFAULT_MODEL_KEY: process.env.DEFAULT_MODEL_KEY || 'deepseek-distill-70b', // Key for the model registry
     APP_URL: process.env.APP_URL || 'http://localhost:3000',
     APP_NAME: process.env.APP_NAME || 'Advanced Deep Research',
     NODE_ENV: process.env.NODE_ENV || 'development',
