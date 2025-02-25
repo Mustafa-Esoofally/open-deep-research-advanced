@@ -41,6 +41,20 @@ function getApiKey(key: string, fallback: string = ''): string {
   return value;
 }
 
+// Available model options for validation
+const AVAILABLE_MODELS = [
+  'openai/o1',
+  'openai/o1-mini', 
+  'deepseek/deepseek-r1',
+  'perplexity/sonar-reasoning',
+  'aion-labs/aion-1.0',
+  'anthropic/claude-3.5-sonnet',
+  // Legacy options for backward compatibility
+  'openai/o3-mini',
+  'anthropic/claude-3-opus',
+  'anthropic/claude-3-sonnet'
+];
+
 // Load and return environment variables with fallbacks
 export function getEnv(forceRefresh: boolean = false) {
   // Note: We can't actually force a reload of process.env in Next.js
@@ -52,15 +66,28 @@ export function getEnv(forceRefresh: boolean = false) {
     console.log('Environment variables refresh requested at', new Date(lastLoadTime).toISOString());
   }
   
+  // Get the model from environment variables with fallback to a default
+  const specifiedModel = process.env.OPENROUTER_MODEL || 'openai/o3-mini';
+  
+  // Validate the model is one we support
+  const modelIsValid = AVAILABLE_MODELS.includes(specifiedModel);
+  const modelToUse = modelIsValid ? specifiedModel : 'openai/o3-mini';
+  
+  // If we had to fall back, log a warning
+  if (!modelIsValid && process.env.NODE_ENV === 'development') {
+    console.warn(`⚠️ Warning: Specified model "${specifiedModel}" is not supported. Using default model "${modelToUse}" instead.`);
+  }
+  
   return {
     // API keys - use server prefixed versions first
     OPENROUTER_API_KEY: getApiKey('OPENROUTER_API_KEY'),
     FIRECRAWL_API_KEY: getApiKey('FIRECRAWL_API_KEY'),
     
     // Other configuration
-    OPENROUTER_MODEL: process.env.OPENROUTER_MODEL || 'openai/o3-mini',
+    OPENROUTER_MODEL: modelToUse,
     OPENROUTER_TEMPERATURE: parseFloat(process.env.OPENROUTER_TEMPERATURE || '0.7'),
     OPENROUTER_MAX_TOKENS: parseInt(process.env.OPENROUTER_MAX_TOKENS || '4000'),
+    DEFAULT_MODEL_KEY: process.env.DEFAULT_MODEL_KEY || 'o1-mini', // Key for the model registry
     APP_URL: process.env.APP_URL || 'http://localhost:3000',
     APP_NAME: process.env.APP_NAME || 'Advanced Deep Research',
     NODE_ENV: process.env.NODE_ENV || 'development',

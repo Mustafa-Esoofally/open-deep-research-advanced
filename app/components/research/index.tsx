@@ -8,6 +8,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import type { Components } from 'react-markdown';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Slider } from '@/app/components/ui/slider';
 
 // UI Components
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/app/components/ui/card';
@@ -26,6 +27,10 @@ import { Label } from '@/app/components/ui/label';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/app/components/ui/tooltip';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/app/components/ui/select';
 import { Skeleton } from '@/app/components/ui/skeleton';
+import { ModelSelector } from '@/app/components/ui/model-selector';
+import { Popover, PopoverContent, PopoverTrigger } from "@/app/components/ui/popover";
+import { useModelSelection } from '@/app/hooks/useModelSelection';
+import { MODEL_CONFIGS } from '@/app/lib/models/providers/model-registry';
 
 // Types
 interface Message {
@@ -92,6 +97,24 @@ const extractDomain = (url: string): string => {
   }
 };
 
+// Get a display name for model identifiers
+const getModelDisplayName = (modelKey: string): string => {
+  if (!modelKey) return 'Unknown';
+  
+  // Try to get the name from model configs
+  if (MODEL_CONFIGS[modelKey]?.name) {
+    // Get the first word or first 6 chars if it's too long
+    const name = MODEL_CONFIGS[modelKey].name;
+    const firstWord = name.split(' ')[0];
+    return firstWord.length > 6 ? firstWord.substring(0, 6) : firstWord;
+  }
+  
+  // Fallback to the key itself
+  const parts = modelKey.split('-');
+  // Use the first part or first 6 chars of the key
+  return parts[0].length > 6 ? parts[0].substring(0, 6) : parts[0];
+};
+
 // Components
 const CodeBlock: React.FC<CodeBlockProps> = ({ language, value }) => {
   return (
@@ -123,17 +146,20 @@ export function Chat() {
   // Deep research settings
   const [isDeepResearch, setIsDeepResearch] = useState(false);
   const [deepResearchSettings, setDeepResearchSettings] = useState({
-    depth: 5,
-    breadth: 5
+    depth: 2,
+    breadth: 3
   });
   const [learnings, setLearnings] = useState<string[]>([]);
+
+  // Use the model selection hook
+  const { selectedModel, updateModel, isLoading: isModelLoading } = useModelSelection();
 
   // Enable deep research mode with predefined settings
   const enableDeepResearch = useCallback(() => {
     setIsDeepResearch(true);
     setDeepResearchSettings({
-      depth: 5,
-      breadth: 5
+      depth: 2,
+      breadth: 3
     });
   }, []);
 
@@ -253,7 +279,8 @@ export function Chat() {
             isDeepResearch: isDeepResearch,
             depth: deepResearchSettings.depth,
             breadth: deepResearchSettings.breadth
-          }
+          },
+          modelKey: selectedModel
         }),
       });
 
@@ -404,66 +431,216 @@ ${data.status || 'Processing...'}`;
 
   // Render helper functions
   const renderSidebarContent = () => {
-    return (
-      <>
-        <div className="flex-1 overflow-auto">
-          <div className="mb-6">
-            <h2 className="mb-3 text-sm font-medium text-muted-foreground">Recent Researches</h2>
-            <div className="space-y-1.5">
-              {messages.filter(m => m.type === 'user').length > 0 ? 
-                messages
-                  .filter(m => m.type === 'user')
-                  .slice(0, 5)
-                  .map((message, i) => (
-                    <Button 
-                      key={i}
-                      variant="ghost" 
-                      className="h-auto w-full justify-start py-2.5 px-3 text-left text-sm hover:bg-muted"
-                      onClick={() => setInput(message.content)}
-                    >
-                      <span className="line-clamp-2">{message.content}</span>
-                    </Button>
-                  ))
-                : 
-                <div className="rounded-md bg-muted/40 px-3 py-4 text-sm text-muted-foreground">
-                  Your recent research queries will appear here
+    if (activeTab === 'settings') {
+      return (
+        <div className="p-4 space-y-6">
+          <div className="space-y-2">
+            <h3 className="text-lg font-semibold">Research Mode</h3>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="deep-research">Deep Research</Label>
+                <div className="text-sm text-muted-foreground">
+                  More thorough research with iterative queries
                 </div>
-              }
+              </div>
+              <Switch
+                id="deep-research"
+                checked={isDeepResearch}
+                onCheckedChange={setIsDeepResearch}
+              />
+            </div>
+          </div>
+
+          {isDeepResearch && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="research-depth">Search Depth</Label>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm">1</span>
+                  <Slider
+                    id="research-depth"
+                    min={1}
+                    max={5}
+                    step={1}
+                    value={[deepResearchSettings.depth]}
+                    onValueChange={(value) => setDeepResearchSettings(prev => ({ ...prev, depth: value[0] }))}
+                    className="flex-1"
+                  />
+                  <span className="text-sm">5</span>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  How many levels of follow-up queries to explore
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="research-breadth">Search Breadth</Label>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm">1</span>
+                  <Slider
+                    id="research-breadth"
+                    min={1}
+                    max={5}
+                    step={1}
+                    value={[deepResearchSettings.breadth]}
+                    onValueChange={(value) => setDeepResearchSettings(prev => ({ ...prev, breadth: value[0] }))}
+                    className="flex-1"
+                  />
+                  <span className="text-sm">5</span>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  How many parallel queries to explore at each level
+                </div>
+              </div>
+            </div>
+          )}
+          
+          <Separator />
+          
+          <div className="space-y-2">
+            <h3 className="text-lg font-semibold">Model Settings</h3>
+            <ModelSelector 
+              value={selectedModel}
+              onValueChange={updateModel}
+              showDescription={true}
+              disabled={isLoading || isModelLoading}
+            />
+          </div>
+          
+          <Separator />
+          
+          <div className="space-y-2">
+            <h3 className="text-lg font-semibold">Display</h3>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="theme-toggle">Dark Mode</Label>
+              <ThemeToggle />
+            </div>
+          </div>
+        </div>
+      );
+    } else if (activeTab === 'sources') {
+      return (
+        <>
+          <div className="flex-1 overflow-auto">
+            <div className="mb-6">
+              <h2 className="mb-3 text-sm font-medium text-muted-foreground">Recent Researches</h2>
+              <div className="space-y-1.5">
+                {messages.filter(m => m.type === 'user').length > 0 ? 
+                  messages
+                    .filter(m => m.type === 'user')
+                    .slice(0, 5)
+                    .map((message, i) => (
+                      <Button 
+                        key={i}
+                        variant="ghost" 
+                        className="h-auto w-full justify-start py-2.5 px-3 text-left text-sm hover:bg-muted"
+                        onClick={() => setInput(message.content)}
+                      >
+                        <span className="line-clamp-2">{message.content}</span>
+                      </Button>
+                    ))
+                  : 
+                  <div className="rounded-md bg-muted/40 px-3 py-4 text-sm text-muted-foreground">
+                    Your recent research queries will appear here
+                  </div>
+                }
+              </div>
+            </div>
+            
+            <Separator className="my-5" />
+            
+            <div>
+              <h2 className="mb-3 text-sm font-medium text-muted-foreground">Example Topics</h2>
+              <div className="grid gap-2">
+                {EXAMPLE_TOPICS.map((topic, i) => (
+                  <Button 
+                    key={i}
+                    variant="outline" 
+                    className="h-auto w-full justify-start py-2.5 px-3 text-left hover:bg-muted"
+                    onClick={() => setInput(topic.query)}
+                  >
+                    <span className="mr-2 text-lg">{topic.icon}</span>
+                    <span className="font-medium">{topic.title}</span>
+                  </Button>
+                ))}
+              </div>
             </div>
           </div>
           
           <Separator className="my-5" />
           
-          <div>
-            <h2 className="mb-3 text-sm font-medium text-muted-foreground">Example Topics</h2>
-            <div className="grid gap-2">
-              {EXAMPLE_TOPICS.map((topic, i) => (
-                <Button 
-                  key={i}
-                  variant="outline" 
-                  className="h-auto w-full justify-start py-2.5 px-3 text-left hover:bg-muted"
-                  onClick={() => setInput(topic.query)}
-                >
-                  <span className="mr-2 text-lg">{topic.icon}</span>
-                  <span className="font-medium">{topic.title}</span>
-                </Button>
-              ))}
+          <div className="rounded-lg bg-muted/50 p-4">
+            <p className="mb-2 font-medium text-sm">Pro Tips</p>
+            <ul className="space-y-1.5 text-xs text-muted-foreground pl-5">
+              <li>Ask specific questions for better results</li>
+              <li>Request sources for evidence-based answers</li>
+              <li>Click on topics to quickly start researching</li>
+            </ul>
+          </div>
+        </>
+      );
+    } else {
+      return (
+        <>
+          <div className="flex-1 overflow-auto">
+            <div className="mb-6">
+              <h2 className="mb-3 text-sm font-medium text-muted-foreground">Recent Researches</h2>
+              <div className="space-y-1.5">
+                {messages.filter(m => m.type === 'user').length > 0 ? 
+                  messages
+                    .filter(m => m.type === 'user')
+                    .slice(0, 5)
+                    .map((message, i) => (
+                      <Button 
+                        key={i}
+                        variant="ghost" 
+                        className="h-auto w-full justify-start py-2.5 px-3 text-left text-sm hover:bg-muted"
+                        onClick={() => setInput(message.content)}
+                      >
+                        <span className="line-clamp-2">{message.content}</span>
+                      </Button>
+                    ))
+                  : 
+                  <div className="rounded-md bg-muted/40 px-3 py-4 text-sm text-muted-foreground">
+                    Your recent research queries will appear here
+                  </div>
+                }
+              </div>
+            </div>
+            
+            <Separator className="my-5" />
+            
+            <div>
+              <h2 className="mb-3 text-sm font-medium text-muted-foreground">Example Topics</h2>
+              <div className="grid gap-2">
+                {EXAMPLE_TOPICS.map((topic, i) => (
+                  <Button 
+                    key={i}
+                    variant="outline" 
+                    className="h-auto w-full justify-start py-2.5 px-3 text-left hover:bg-muted"
+                    onClick={() => setInput(topic.query)}
+                  >
+                    <span className="mr-2 text-lg">{topic.icon}</span>
+                    <span className="font-medium">{topic.title}</span>
+                  </Button>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
-        
-        <Separator className="my-5" />
-        
-        <div className="rounded-lg bg-muted/50 p-4">
-          <p className="mb-2 font-medium text-sm">Pro Tips</p>
-          <ul className="space-y-1.5 text-xs text-muted-foreground pl-5">
-            <li>Ask specific questions for better results</li>
-            <li>Request sources for evidence-based answers</li>
-            <li>Click on topics to quickly start researching</li>
-          </ul>
-        </div>
-      </>
-    );
+          
+          <Separator className="my-5" />
+          
+          <div className="rounded-lg bg-muted/50 p-4">
+            <p className="mb-2 font-medium text-sm">Pro Tips</p>
+            <ul className="space-y-1.5 text-xs text-muted-foreground pl-5">
+              <li>Ask specific questions for better results</li>
+              <li>Request sources for evidence-based answers</li>
+              <li>Click on topics to quickly start researching</li>
+            </ul>
+          </div>
+        </>
+      );
+    }
   };
 
   // Add a tab for learning insights in the side panel when using deep research
@@ -613,90 +790,31 @@ ${data.status || 'Processing...'}`;
   };
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      {/* Mobile sidebar */}
-      <Sheet>
-        <SheetTrigger asChild>
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            className="fixed left-3 top-3 z-30 md:hidden"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="3" y1="12" x2="21" y2="12" />
-              <line x1="3" y1="6" x2="21" y2="6" />
-              <line x1="3" y1="18" x2="21" y2="18" />
-            </svg>
-            <span className="sr-only">Toggle menu</span>
-          </Button>
-        </SheetTrigger>
-        <SheetContent side="left" className="w-[300px] p-0">
-          <div className="flex h-full flex-col p-4">
-            <div className="mb-4 flex items-center">
-              <h3 className="text-lg font-bold">Deep Research</h3>
-              <Badge variant="outline" className="ml-2">AI-Powered</Badge>
-            </div>
-            <Separator className="mb-4" />
-            {renderSidebarContent()}
+    <div className="flex flex-col h-screen bg-background overflow-hidden">
+      {/* Model loading overlay */}
+      {isModelLoading && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-4 text-center">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+            <h3 className="text-xl font-medium">Loading Models</h3>
+            <p className="text-sm text-muted-foreground max-w-xs">
+              Preparing available AI models for your research experience...
+            </p>
           </div>
-        </SheetContent>
-      </Sheet>
-
-      {/* Desktop sidebar */}
-      <div className="hidden h-full w-[280px] shrink-0 flex-col border-r bg-background/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-background/60 md:flex">
-        {renderSidebarContent()}
-      </div>
+        </div>
+      )}
 
       {/* Main content */}
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* Header */}
-        <header className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-          <div className="container flex h-16 max-w-screen-2xl items-center">
+      <div className="flex flex-col flex-grow overflow-hidden">
+        {/* Header - Simplified */}
+        <header className="border-b bg-background/95 backdrop-blur py-4 px-4">
+          <div className="container max-w-screen-2xl mx-auto flex items-center justify-between">
             <div className="flex items-center gap-2">
               <h1 className="text-lg font-semibold">Deep Research</h1>
               <Badge variant="secondary" className="ml-1">AI-Powered</Badge>
             </div>
-            <div className="ml-auto flex items-center gap-3">
-              {/* Moved Deep Research controls to input area */}
-              
-              {/* Add deep research settings when enabled */}
-              {isDeepResearch && (
-                <div className="hidden md:flex gap-2 items-center">
-                  <Select 
-                    value={deepResearchSettings.depth.toString()} 
-                    onValueChange={(value) => setDeepResearchSettings(prev => ({...prev, depth: parseInt(value)}))}
-                    disabled={isLoading}
-                  >
-                    <SelectTrigger className="w-[120px] h-8">
-                      <SelectValue placeholder="Depth" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="1">Depth: 1</SelectItem>
-                      <SelectItem value="2">Depth: 2</SelectItem>
-                      <SelectItem value="3">Depth: 3</SelectItem>
-                      <SelectItem value="4">Depth: 4</SelectItem>
-                      <SelectItem value="5">Depth: 5</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  
-                  <Select 
-                    value={deepResearchSettings.breadth.toString()} 
-                    onValueChange={(value) => setDeepResearchSettings(prev => ({...prev, breadth: parseInt(value)}))}
-                    disabled={isLoading}
-                  >
-                    <SelectTrigger className="w-[120px] h-8">
-                      <SelectValue placeholder="Breadth" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="2">Breadth: 2</SelectItem>
-                      <SelectItem value="3">Breadth: 3</SelectItem>
-                      <SelectItem value="4">Breadth: 4</SelectItem>
-                      <SelectItem value="5">Breadth: 5</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              
+            
+            <div className="flex items-center gap-2">
               <ThemeToggle />
               
               {messages.length > 0 && (
@@ -727,152 +845,149 @@ ${data.status || 'Processing...'}`;
                     <path d="M3 6h6" />
                     <path d="M3 9h3" />
                   </svg>
-                  New Research
+                  New
                 </Button>
               )}
+              
+              {/* Mobile menu */}
+              <Sheet>
+                <SheetTrigger asChild>
+                  <Button variant="ghost" size="icon" className="md:hidden">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="3" y1="12" x2="21" y2="12" />
+                      <line x1="3" y1="6" x2="21" y2="6" />
+                      <line x1="3" y1="18" x2="21" y2="18" />
+                    </svg>
+                    <span className="sr-only">Menu</span>
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="right" className="w-[300px] p-0">
+                  <div className="flex h-full flex-col p-4">
+                    <div className="mb-4 flex items-center justify-between">
+                      <h3 className="text-lg font-bold">Settings</h3>
+                      <Badge variant="outline">AI-Powered</Badge>
+                    </div>
+                    <Separator className="mb-4" />
+                    {renderSidebarContent()}
+                  </div>
+                </SheetContent>
+              </Sheet>
             </div>
           </div>
         </header>
 
-        {/* Messages area */}
-        <ScrollArea className="flex-1">
-          <div className="container mx-auto max-w-4xl px-4 py-8">
-            {/* Welcome message */}
-            {messages.length === 0 && (
-              <motion.div 
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
-                className="space-y-8 py-8"
-              >
-                <div className="text-center">
-                  <h2 className="mb-4 text-3xl font-bold">Welcome to Deep Research</h2>
-                  <p className="mx-auto mb-6 max-w-lg text-muted-foreground">
-                    Ask any research question to get comprehensive, AI-powered analysis with credible sources.
-                  </p>
-                </div>
+        {/* Messages area with fixed width container */}
+        <div className="flex-grow overflow-auto">
+          <div className="container mx-auto max-w-3xl px-4 py-12">
+            {/* Welcome message / empty state */}
+            {messages.length === 0 ? (
+              <div className="flex flex-col items-center justify-center mt-8 mb-16">
+                <h2 className="text-4xl font-bold text-center mb-4">What do you want to know?</h2>
+                <p className="text-muted-foreground text-center max-w-lg mb-12">
+                  Ask any research question to get comprehensive, AI-powered analysis with credible sources.
+                </p>
                 
-                <div className="mx-auto grid max-w-3xl grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-2xl">
                   {EXAMPLE_TOPICS.map((topic, i) => (
-                    <motion.div
+                    <Button 
                       key={i}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.3, delay: i * 0.1 }}
+                      variant="outline" 
+                      className="h-auto p-4 justify-start text-left hover:bg-muted/50"
+                      onClick={() => setInput(topic.query)}
                     >
-                      <Card className="transition-all hover:shadow-md hover:bg-muted/50">
-                        <CardHeader className="pb-2">
-                          <div className="flex items-center">
-                            <span className="mr-2 flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-2xl text-primary">
-                              {topic.icon}
-                            </span>
-                            <CardTitle className="text-lg">{topic.title}</CardTitle>
-                          </div>
-                        </CardHeader>
-                        <CardContent className="pb-2">
-                          <CardDescription className="line-clamp-2">
-                            {topic.description}
-                          </CardDescription>
-                        </CardContent>
-                        <CardFooter className="pt-0">
-                          <Button 
-                            variant="ghost" 
-                            className="w-full justify-center"
-                            onClick={() => setInput(topic.query)}
-                          >
-                            Research This Topic
-                          </Button>
-                        </CardFooter>
-                      </Card>
-                    </motion.div>
+                      <span className="mr-3 text-2xl">{topic.icon}</span>
+                      <div className="flex flex-col items-start">
+                        <span className="font-medium text-base">{topic.title}</span>
+                        <span className="text-xs text-muted-foreground mt-1">{topic.description}</span>
+                      </div>
+                    </Button>
                   ))}
                 </div>
-              </motion.div>
-            )}
-
-            {/* Messages */}
-            <div className="space-y-6">
-              <AnimatePresence>
-                {messages.map((message, i) => (
-                  <motion.div 
-                    key={i}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.3 }}
-                    className={`group/message ${
-                      message.type === 'user' ? 'flex justify-end' : ''
-                    }`}
-                  >
-                    <div className={`flex gap-3 ${
-                      message.type === 'user' 
-                        ? 'ml-12 max-w-[80%]' 
-                        : message.type === 'system'
-                        ? 'max-w-[90%]'
-                        : 'mr-12 max-w-[90%]'
-                    }`}>
-                      {message.type !== 'user' && (
-                        <Avatar className="mt-1 h-9 w-9 shrink-0 select-none">
-                          <AvatarFallback className={message.type === 'assistant' ? 
-                            "bg-primary/10 text-primary" : 
-                            "bg-muted text-muted-foreground"}>
-                            {message.type === 'assistant' ? 'AI' : '⚙️'}
-                          </AvatarFallback>
-                        </Avatar>
-                      )}
-                      
-                      <div className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'} w-full`}>
-                        <div className={`
-                          space-y-2 rounded-lg px-4 py-3
-                          ${message.type === 'user' ? 'bg-primary text-primary-foreground' : 
-                            message.type === 'assistant' ? 'bg-muted shadow-sm' : 'bg-transparent w-full'}
-                        `}>
-                          {message.type !== 'system' && (
-                            <div>
-                              {message.timestamp && (
-                                <div className="mb-1 text-xs opacity-70">
-                                  {formatTime(message.timestamp)}
-                                </div>
-                              )}
-                              <ReactMarkdown 
-                                components={markdownComponents}
-                                className={`prose ${message.type === 'user' ? 'prose-invert' : ''} max-w-none`}
-                              >
-                                {message.content}
-                              </ReactMarkdown>
-                            </div>
-                          )}
-                          
-                          {message.type === 'system' && (
-                            <div className="w-full rounded-md bg-muted/80 p-4 text-sm shadow-sm">
-                              {message.metadata ? (
-                                isDeepResearch ? 
-                                renderDeepResearchProgress(message) : 
-                                <div className="space-y-2">
-                                  <span className="text-sm text-muted-foreground">{message.metadata.status || 'Researching...'}</span>
-                                  <Progress value={message.metadata.progress} className="h-1.5" />
-                                </div>
-                              ) : (
-                                message.content
-                              )}
-                            </div>
-                          )}
+              </div>
+            ) : (
+              <div className="space-y-6">
+                <AnimatePresence>
+                  {messages.map((message, i) => (
+                    <motion.div 
+                      key={i}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.3 }}
+                      className={`group/message ${
+                        message.type === 'user' ? 'flex justify-end' : ''
+                      }`}
+                    >
+                      <div className={`flex gap-3 ${
+                        message.type === 'user' 
+                          ? 'ml-12 max-w-[80%]' 
+                          : message.type === 'system'
+                          ? 'max-w-[90%]'
+                          : 'mr-12 max-w-[90%]'
+                      }`}>
+                        {message.type !== 'user' && (
+                          <Avatar className="mt-1 h-9 w-9 shrink-0 select-none">
+                            <AvatarFallback className={message.type === 'assistant' ? 
+                              "bg-primary/10 text-primary" : 
+                              "bg-muted text-muted-foreground"}>
+                              {message.type === 'assistant' ? 'AI' : '⚙️'}
+                            </AvatarFallback>
+                          </Avatar>
+                        )}
+                        
+                        <div className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'} w-full`}>
+                          <div className={`
+                            space-y-2 rounded-lg px-4 py-3
+                            ${message.type === 'user' ? 'bg-primary text-primary-foreground' : 
+                              message.type === 'assistant' ? 'bg-muted shadow-sm' : 'bg-transparent w-full'}
+                          `}>
+                            {message.type !== 'system' && (
+                              <div>
+                                {message.timestamp && (
+                                  <div className="mb-1 text-xs opacity-70">
+                                    {formatTime(message.timestamp)}
+                                  </div>
+                                )}
+                                <ReactMarkdown 
+                                  components={markdownComponents}
+                                  className={`prose ${message.type === 'user' ? 'prose-invert' : ''} max-w-none`}
+                                >
+                                  {message.content}
+                                </ReactMarkdown>
+                              </div>
+                            )}
+                            
+                            {message.type === 'system' && (
+                              <div className="w-full rounded-md bg-muted/80 p-4 text-sm shadow-sm">
+                                {message.metadata ? (
+                                  isDeepResearch ? 
+                                  renderDeepResearchProgress(message) : 
+                                  <div className="space-y-2">
+                                    <span className="text-sm text-muted-foreground">{message.metadata.status || 'Researching...'}</span>
+                                    <Progress value={message.metadata.progress} className="h-1.5" />
+                                  </div>
+                                ) : (
+                                  message.content
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
+                        
+                        {message.type === 'user' && (
+                          <Avatar className="mt-1 h-9 w-9 shrink-0 select-none">
+                            <AvatarFallback className="bg-primary text-primary-foreground">U</AvatarFallback>
+                          </Avatar>
+                        )}
                       </div>
-                      
-                      {message.type === 'user' && (
-                        <Avatar className="mt-1 h-9 w-9 shrink-0 select-none">
-                          <AvatarFallback className="bg-primary text-primary-foreground">U</AvatarFallback>
-                        </Avatar>
-                      )}
-                    </div>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-              <div ref={messagesEndRef} />
-            </div>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+                <div ref={messagesEndRef} />
+              </div>
+            )}
           </div>
-        </ScrollArea>
+        </div>
 
         {/* Sources panel - Desktop */}
         <AnimatePresence>
@@ -896,7 +1011,7 @@ ${data.status || 'Processing...'}`;
               <Button
                 variant="outline"
                 size="sm"
-                className="fixed bottom-20 right-4 z-10 flex items-center gap-1 shadow-md md:hidden"
+                className="fixed bottom-24 right-4 z-10 flex items-center gap-1 shadow-md md:hidden"
               >
                 <span>{activeTab === 'sources' ? 'Sources' : activeTab === 'learnings' ? 'Insights' : 'Research'}</span>
                 {activeTab === 'sources' && sources.length > 0 && (
@@ -911,85 +1026,249 @@ ${data.status || 'Processing...'}`;
                 )}
               </Button>
             </SheetTrigger>
-            <SheetContent side="bottom" className="h-[80vh] px-0 pt-6 md:hidden">
+            <SheetContent side="bottom" className="h-[70vh] px-0 pt-6">
               {renderSidePanelTabs()}
             </SheetContent>
           </Sheet>
         )}
 
-        {/* Input area */}
-        <div className="sticky bottom-0 border-t bg-background p-4">
-          {/* Input container with enhanced styling */}
-          <form 
-            onSubmit={handleSubmit}
-            className="relative mx-auto max-w-3xl"
-          >
-            <div className="flex items-end gap-2">
-              {/* Deep Research toggle moved to input area */}
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
+        {/* Input area - Fixed at bottom */}
+        <div className="border-t bg-background/80 backdrop-blur-md py-6 px-4 sticky bottom-0 z-20">
+          <div className="container mx-auto max-w-3xl">
+            {messages.length === 0 && (
+              <h2 className="text-2xl font-medium text-center mb-4">
+                What do you want to know?
+              </h2>
+            )}
+            
+            <form onSubmit={handleSubmit} className="relative">
+              <div className="flex items-center gap-2 bg-background rounded-xl border shadow-sm p-1">
+                {/* Research mode selector */}
+                <Popover>
+                  <PopoverTrigger asChild>
                     <Button
                       type="button"
                       variant="ghost"
-                      size="icon"
-                      className="h-10 w-10 shrink-0"
-                      onClick={() => setIsDeepResearch(!isDeepResearch)}
+                      size="sm"
+                      className="h-10 rounded-lg text-muted-foreground hover:text-foreground px-3 flex items-center gap-2"
                     >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="20"
-                        height="20"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
+                      {isDeepResearch ? (
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="18"
+                          height="18"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className="text-primary"
+                        >
+                          <circle cx="12" cy="12" r="10" />
+                          <path d="M12 2a4.5 4.5 0 0 0 0 9 4.5 4.5 0 0 1 0 9 4.5 4.5 0 0 0 0-9 4.5 4.5 0 0 1 0-9Z" />
+                          <path d="M12 16v.01" />
+                        </svg>
+                      ) : (
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="18"
+                          height="18"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+                        </svg>
+                      )}
+                      <span className="hidden sm:inline text-sm">
+                        {isDeepResearch ? "Deep Research" : "Auto"}
+                      </span>
+                      <svg 
+                        xmlns="http://www.w3.org/2000/svg" 
+                        width="14" 
+                        height="14" 
+                        viewBox="0 0 24 24" 
+                        fill="none" 
+                        stroke="currentColor" 
+                        strokeWidth="2" 
+                        strokeLinecap="round" 
                         strokeLinejoin="round"
-                        className={isDeepResearch ? "text-primary" : "text-muted-foreground"}
+                        className="text-muted-foreground"
                       >
-                        <circle cx="12" cy="12" r="10" />
-                        <path d="M12 2a4.5 4.5 0 0 0 0 9 4.5 4.5 0 0 1 0 9 4.5 4.5 0 0 0 0-9 4.5 4.5 0 0 1 0-9Z" />
-                        <path d="M12 16v.01" />
+                        <path d="m6 9 6 6 6-6"/>
                       </svg>
                     </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top">
-                    <p className="text-xs">{isDeepResearch ? 'Disable' : 'Enable'} Deep Research</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-
-              <div className="relative flex-1">
-                <Textarea 
-                  placeholder={isDeepResearch 
-                    ? "Ask a complex research question for deep multi-query research..." 
-                    : "Ask a research question..."}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  rows={1}
-                  className="min-h-[3.25rem] resize-none pr-16 py-3.5 pl-4 rounded-md shadow-sm border-muted"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSubmit(e);
-                    }
-                  }}
-                />
-                <div className="absolute right-2 top-1/2 -translate-y-1/2">              
-                  <Button 
-                    type="submit" 
-                    disabled={isLoading || !input.trim()}
-                    className="h-9"
-                  >
-                    {isLoading ? (
-                      <div className="flex items-center gap-1.5">
-                        <div className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
-                        <span>Working</span>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[260px] p-0" align="start">
+                    <div className="p-3 space-y-3">
+                      <h3 className="text-sm font-medium border-b pb-2">Select Mode</h3>
+                      
+                      <div className="grid gap-2">
+                        <Button 
+                          variant="ghost" 
+                          className={`w-full justify-start p-2.5 ${!isDeepResearch ? 'ring-1 ring-primary bg-muted/30' : ''}`}
+                          onClick={() => setIsDeepResearch(false)}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="flex-shrink-0 h-8 w-8 rounded-full bg-muted flex items-center justify-center">
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="16"
+                                height="16"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+                              </svg>
+                            </div>
+                            <div className="flex flex-col items-start">
+                              <span className="font-medium text-sm">Auto</span>
+                              <span className="text-xs text-muted-foreground">Quick answers using the web</span>
+                            </div>
+                            {!isDeepResearch && (
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                className="ml-auto text-primary"
+                              >
+                                <path d="M20 6 9 17l-5-5" />
+                              </svg>
+                            )}
+                          </div>
+                        </Button>
+                        
+                        <Button 
+                          variant="ghost" 
+                          className={`w-full justify-start p-2.5 ${isDeepResearch ? 'ring-1 ring-primary bg-muted/30' : ''}`}
+                          onClick={() => setIsDeepResearch(true)}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="flex-shrink-0 h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="16"
+                                height="16"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <circle cx="12" cy="12" r="10" />
+                                <path d="M12 2a4.5 4.5 0 0 0 0 9 4.5 4.5 0 0 1 0 9 4.5 4.5 0 0 0 0-9 4.5 4.5 0 0 1 0-9Z" />
+                                <path d="M12 16v.01" />
+                              </svg>
+                            </div>
+                            <div className="flex flex-col items-start">
+                              <span className="font-medium text-sm">Deep Research</span>
+                              <span className="text-xs text-muted-foreground">In-depth reports on complex topics</span>
+                            </div>
+                            {isDeepResearch && (
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                className="ml-auto text-primary"
+                              >
+                                <path d="M20 6 9 17l-5-5" />
+                              </svg>
+                            )}
+                          </div>
+                        </Button>
                       </div>
-                    ) : (
-                      <div className="flex items-center gap-1.5">
-                        <span>Send</span>
+                      
+                      {isDeepResearch && (
+                        <div className="mt-3 pt-3 border-t space-y-3">
+                          <h4 className="text-xs font-medium">Deep Research Settings</h4>
+                          
+                          <div className="space-y-3">
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between">
+                                <Label htmlFor="depth-control" className="text-xs">Research Depth</Label>
+                                <Badge variant="outline" className="h-5 text-xs">{deepResearchSettings.depth}</Badge>
+                              </div>
+                              <Slider
+                                id="depth-control"
+                                min={1}
+                                max={5}
+                                step={1}
+                                value={[deepResearchSettings.depth]}
+                                onValueChange={(value) => setDeepResearchSettings(prev => ({ ...prev, depth: value[0] }))}
+                              />
+                            </div>
+                            
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between">
+                                <Label htmlFor="breadth-control" className="text-xs">Research Breadth</Label>
+                                <Badge variant="outline" className="h-5 text-xs">{deepResearchSettings.breadth}</Badge>
+                              </div>
+                              <Slider
+                                id="breadth-control"
+                                min={1}
+                                max={5}
+                                step={1}
+                                value={[deepResearchSettings.breadth]}
+                                onValueChange={(value) => setDeepResearchSettings(prev => ({ ...prev, breadth: value[0] }))}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+
+                {/* Text input area */}
+                <div className="flex-1">
+                  <Textarea 
+                    placeholder="Ask anything..."
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    rows={1}
+                    className="min-h-[40px] max-h-[200px] resize-none py-2.5 px-1 border-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSubmit(e);
+                      }
+                    }}
+                  />
+                </div>
+
+                {/* Action buttons */}
+                <div className="flex items-center gap-2 pr-1">
+                  {/* Model Selector */}
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground relative"
+                        disabled={isModelLoading}
+                      >
                         <svg
                           xmlns="http://www.w3.org/2000/svg"
                           width="16"
@@ -1000,163 +1279,98 @@ ${data.status || 'Processing...'}`;
                           strokeWidth="2"
                           strokeLinecap="round"
                           strokeLinejoin="round"
+                          className={`${isModelLoading ? "animate-pulse" : ""}`}
                         >
-                          <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" />
+                          <circle cx="12" cy="12" r="3" />
+                          <path d="m19 12-7-7-7 7 7 7 7-7Z" />
                         </svg>
+                        {isModelLoading && (
+                          <span className="absolute -top-1 -right-1 h-2 w-2">
+                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75"></span>
+                            <span className="relative inline-flex h-2 w-2 rounded-full bg-primary"></span>
+                          </span>
+                        )}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[270px] p-0" align="end">
+                      <div className="p-3 space-y-3">
+                        <h3 className="text-sm font-medium border-b pb-2">Select AI Model</h3>
+                        
+                        <div className="grid gap-2 max-h-[300px] overflow-y-auto pr-1">
+                          {Object.entries(MODEL_CONFIGS).map(([key, model]) => (
+                            <Button 
+                              key={key}
+                              variant="ghost" 
+                              className={`w-full justify-start p-2.5 ${selectedModel === key ? 'ring-1 ring-primary bg-muted/30' : ''}`}
+                              onClick={() => {
+                                updateModel(key);
+                                toast.success(`Model changed to ${model.name}`);
+                              }}
+                            >
+                              <div className="flex items-start gap-3">
+                                <div className="flex-shrink-0 h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                                  <span className="text-xs font-semibold">
+                                    {model.provider ? model.provider[0] : 'AI'}
+                                  </span>
+                                </div>
+                                <div className="flex flex-col items-start">
+                                  <span className="font-medium text-sm">{model.name}</span>
+                                  <span className="text-xs text-muted-foreground">{model.provider || 'AI model'}</span>
+                                </div>
+                                {selectedModel === key && (
+                                  <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    width="14"
+                                    height="14"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    className="ml-auto text-primary"
+                                  >
+                                    <path d="M20 6 9 17l-5-5" />
+                                  </svg>
+                                )}
+                              </div>
+                            </Button>
+                          ))}
+                        </div>
                       </div>
+                    </PopoverContent>
+                  </Popover>
+
+                  {/* Send button */}
+                  <Button 
+                    type="submit" 
+                    disabled={isLoading || !input.trim()}
+                    className="h-9 rounded-full"
+                    size="icon"
+                  >
+                    {isLoading ? (
+                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
+                    ) : (
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="m5 12 14-9-9 18v-9z" />
+                      </svg>
                     )}
                   </Button>
                 </div>
               </div>
-            </div>
-          </form>
-          <div className="mt-2 flex items-center justify-center gap-1.5">
-            {isDeepResearch ? (
-              <div className="flex items-center space-x-1.5 text-xs text-muted-foreground">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <circle cx="12" cy="12" r="10" />
-                  <path d="M12 2a4.5 4.5 0 0 0 0 9 4.5 4.5 0 0 1 0 9 4.5 4.5 0 0 0 0-9 4.5 4.5 0 0 1 0-9Z" />
-                  <path d="M12 16v.01" />
-                </svg>
-                <span>
-                  Deep Research Mode {deepResearchSettings.depth > 2 || deepResearchSettings.breadth > 3 ? '(Higher settings may take longer)' : ''}
-                </span>
-              </div>
-            ) : (
-              <div className="flex items-center space-x-1.5 text-xs text-muted-foreground">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="8" x2="12" y2="12" />
-                  <line x1="12" y1="16" x2="12.01" y2="16" />
-                </svg>
-                <span>Powered by advanced AI research tools and web search</span>
-              </div>
-            )}
+            </form>
           </div>
         </div>
-
-        {/* Mobile Deep Research settings button */}
-        {isDeepResearch && (
-          <Sheet>
-            <SheetTrigger asChild>
-              <Button
-                variant="outline"
-                size="icon"
-                className="fixed bottom-20 right-24 z-10 shadow-md md:hidden h-9 w-9"
-              >
-                <svg 
-                  xmlns="http://www.w3.org/2000/svg" 
-                  width="18" 
-                  height="18" 
-                  viewBox="0 0 24 24" 
-                  fill="none" 
-                  stroke="currentColor" 
-                  strokeWidth="2" 
-                  strokeLinecap="round" 
-                  strokeLinejoin="round"
-                >
-                  <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-                  <circle cx="12" cy="12" r="3" />
-                </svg>
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="bottom" className="pt-6 md:hidden">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-medium">Deep Research Settings</h3>
-                  <Badge variant="outline">Beta</Badge>
-                </div>
-                
-                <p className="text-sm text-muted-foreground">
-                  Configure settings for more comprehensive research results
-                </p>
-                
-                <div className="space-y-4 mt-4">
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="mobile-depth" className="font-medium">Research Depth</Label>
-                      <Badge variant="secondary">{deepResearchSettings.depth}/5</Badge>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Higher values produce more thorough research but take longer.</p>
-                    <Select 
-                      value={deepResearchSettings.depth.toString()} 
-                      onValueChange={(value) => setDeepResearchSettings(prev => ({...prev, depth: parseInt(value)}))}
-                    >
-                      <SelectTrigger id="mobile-depth">
-                        <SelectValue placeholder="Depth" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="1">Depth: 1 (Quick)</SelectItem>
-                        <SelectItem value="2">Depth: 2 (Standard)</SelectItem>
-                        <SelectItem value="3">Depth: 3 (Thorough)</SelectItem>
-                        <SelectItem value="4">Depth: 4 (Comprehensive)</SelectItem>
-                        <SelectItem value="5">Depth: 5 (Maximum)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="mobile-breadth" className="font-medium">Research Breadth</Label>
-                      <Badge variant="secondary">{deepResearchSettings.breadth}/5</Badge>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Higher values explore more diverse sources and perspectives.</p>
-                    <Select 
-                      value={deepResearchSettings.breadth.toString()} 
-                      onValueChange={(value) => setDeepResearchSettings(prev => ({...prev, breadth: parseInt(value)}))}
-                    >
-                      <SelectTrigger id="mobile-breadth">
-                        <SelectValue placeholder="Breadth" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="2">Breadth: 2 (Focused)</SelectItem>
-                        <SelectItem value="3">Breadth: 3 (Balanced)</SelectItem>
-                        <SelectItem value="4">Breadth: 4 (Diverse)</SelectItem>
-                        <SelectItem value="5">Breadth: 5 (Maximum)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  
-                  <Button 
-                    variant="default" 
-                    className="w-full mt-2"
-                    onClick={() => {
-                      const sheet = document.querySelector('[data-state="open"]');
-                      if (sheet) {
-                        const closeButton = sheet.querySelector('button[aria-label="Close"]');
-                        if (closeButton) {
-                          (closeButton as HTMLButtonElement).click();
-                        }
-                      }
-                    }}
-                  >
-                    Apply Settings
-                  </Button>
-                </div>
-              </div>
-            </SheetContent>
-          </Sheet>
-        )}
       </div>
     </div>
   );

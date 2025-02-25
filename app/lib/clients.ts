@@ -64,12 +64,15 @@ class CustomOpenRouterClient {
     return this.apiKey;
   }
 
-  async chat(messages: Array<{ role: string; content: string }>) {
+  async chat(messages: Array<{ role: string; content: string }>, options: { model?: string } = {}) {
     try {
       // Always use the latest API key
       const currentApiKey = this.refreshApiKey();
       
-      console.log('Calling OpenRouter with model:', OPENROUTER_MODEL);
+      // Get the model from options or environment 
+      const model = options.model || OPENROUTER_MODEL;
+      
+      console.log('Calling OpenRouter with model:', model);
       
       // Verify API key is available before making the request
       if (!currentApiKey || currentApiKey.trim() === '') {
@@ -94,7 +97,7 @@ class CustomOpenRouterClient {
             'X-Title': APP_NAME
           },
           body: JSON.stringify({
-            model: OPENROUTER_MODEL,
+            model: model,
             messages: messages,
             temperature: OPENROUTER_TEMPERATURE,
             max_tokens: OPENROUTER_MAX_TOKENS
@@ -178,6 +181,14 @@ export const openRouterClient = new CustomOpenRouterClient();
 
 // Create an adapter that's compatible with the LangChain pipe() method
 export const openRouterAdapter = {
+  model: OPENROUTER_MODEL,
+  
+  // Set the model to use
+  setModel(modelId: string) {
+    this.model = modelId;
+    return this;
+  },
+  
   invoke: async ({ query, searchResults }: { query: string; searchResults: string }) => {
     try {
       // Format the prompt similar to what the LangChain version would do
@@ -210,7 +221,7 @@ Always cite your sources throughout the text using [Source: URL] format.`
         }
       ];
 
-      const content = await openRouterClient.chat(messages);
+      const content = await openRouterClient.chat(messages, { model: openRouterAdapter.model });
       return { content };
     } catch (error) {
       console.error('OpenRouter adapter error:', error);

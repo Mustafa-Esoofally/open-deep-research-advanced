@@ -50,12 +50,15 @@ const CONCURRENCY_LIMIT = 2;
 export class UnifiedResearchAgent {
   private progressCallback?: (progress: ResearchProgress) => void;
   private abortController: AbortController;
+  private modelKey: string;
 
   constructor(config: { 
     progressCallback?: (progress: ResearchProgress) => void;
+    modelKey?: string;
   } = {}) {
     this.progressCallback = config.progressCallback;
     this.abortController = new AbortController();
+    this.modelKey = config.modelKey || process.env.DEFAULT_MODEL_KEY || 'o1-mini';
   }
 
   /**
@@ -232,8 +235,8 @@ Return your response as a valid JSON object with this structure:
         { role: 'user', content: userPrompt }
       ];
 
-      // Call the OpenRouter API
-      const result = await openRouterClient.chat(messages);
+      // Call the OpenRouter API with the selected model
+      const result = await openRouterClient.chat(messages, { model: this.modelKey });
       
       // Parse the result to extract the queries
       try {
@@ -278,55 +281,68 @@ Return your response as a valid JSON object with this structure:
     results: any[], 
     numLearnings = 3, 
     numFollowUpQuestions = 3
-  ): Promise<{learnings: string[]; followUpQuestions: string[]}> {
+  ): Promise<{ 
+    learnings: string[]; 
+    followUpQuestions: Array<{query: string; goal: string}>;
+  }> {
     try {
-      // Extract and format content from search results
-      const contents = results
-        .map(item => item.markdown || item.description || '')
-        .filter(Boolean)
-        .map(content => this.trimPrompt(content, 25000));
-
-      console.log(`Processing results for "${query}", found ${contents.length} contents`);
-
-      if (contents.length === 0) {
+      // Skip if there are no results
+      if (!results || results.length === 0) {
         return { learnings: [], followUpQuestions: [] };
       }
+
+      // Format search results as text
+      const formattedResults = results.map((result, index) => {
+        const content = result.snippet || result.description || result.content || 'No content available';
+        const title = result.title || `Result ${index + 1}`;
+        const url = result.url || '#';
+        
+        return `
+## Result ${index + 1}: ${title}
+URL: ${url}
+Content: ${content}
+        `;
+      }).join('\n\n');
 
       const systemMessage = {
         role: 'system',
         content: DEFAULT_SYSTEM_PROMPT
       };
 
-      const userPrompt = `Given the following contents from a search for the query "${query}", generate a list of learnings and follow-up questions.
+      const userPrompt = `Given the user's query and these search results, extract key learnings and suggest follow-up questions.
 
-CONTENTS:
-${contents.map(content => `===\n${content}\n===`).join('\n\n')}
+USER QUERY: ${query}
 
-Extract the most important and relevant information. The learnings should be concise, detailed, and information-dense, including specific entities, metrics, numbers, or dates when present.
+SEARCH RESULTS:
+${formattedResults}
 
-Return your response as a valid JSON object with this structure:
+Provide your response as a valid JSON object with this structure:
 {
   "learnings": [
-    "First detailed learning point",
-    "Second detailed learning point",
+    "Key insight 1 from the search results, stated concisely as a standalone fact",
+    "Key insight 2...",
     ...
   ],
   "followUpQuestions": [
-    "First follow-up question to explore",
-    "Second follow-up question to explore",
+    {
+      "query": "A follow-up search query that would deepen the research",
+      "goal": "Explanation of why this follow-up question is valuable"
+    },
     ...
   ]
-}`;
+}
+
+Make sure your response is a valid JSON object with the exact structure shown above. Include at most ${numLearnings} learnings and ${numFollowUpQuestions} follow-up questions.`;
 
       const messages = [
         systemMessage,
         { role: 'user', content: userPrompt }
       ];
 
-      // Call the OpenRouter API
-      const result = await openRouterClient.chat(messages);
-      
-      // Parse the result to extract the learnings and questions
+      // Call the OpenRouter API with the selected model
+      const result = await openRouterClient.chat(messages, { model: this.modelKey });
+
+      // Parse the result
       try {
         // Find JSON object in the response (it might be wrapped in markdown code blocks)
         const jsonMatch = result.match(/```(?:json)?\s*({[\s\S]*?})\s*```/) || 
@@ -335,23 +351,16 @@ Return your response as a valid JSON object with this structure:
         const jsonStr = jsonMatch ? jsonMatch[1] || jsonMatch[0] : result;
         const parsed = JSON.parse(jsonStr);
         
-        if (parsed) {
-          const learnings = Array.isArray(parsed.learnings) ? parsed.learnings.slice(0, numLearnings) : [];
-          const followUpQuestions = Array.isArray(parsed.followUpQuestions) 
-            ? parsed.followUpQuestions.slice(0, numFollowUpQuestions) 
-            : [];
-            
-          console.log(`Extracted ${learnings.length} learnings and ${followUpQuestions.length} follow-up questions`);
-          
+        if (parsed && Array.isArray(parsed.learnings) && Array.isArray(parsed.followUpQuestions)) {
           return {
-            learnings,
-            followUpQuestions
+            learnings: parsed.learnings.slice(0, numLearnings),
+            followUpQuestions: parsed.followUpQuestions.slice(0, numFollowUpQuestions)
           };
         } else {
           throw new Error('Invalid response format');
         }
       } catch (parseError) {
-        console.error('Error parsing SERP processing response:', parseError);
+        console.error('Error parsing response:', parseError);
         return { learnings: [], followUpQuestions: [] };
       }
     } catch (error) {
@@ -393,7 +402,7 @@ Your report should be well-formatted in Markdown with appropriate headings, bull
       ];
 
       // Call the OpenRouter API
-      const result = await openRouterClient.chat(messages);
+      const result = await openRouterClient.chat(messages, { model: this.modelKey });
       
       return { 
         content: result, 
@@ -443,7 +452,7 @@ Format the report in Markdown with appropriate headings, lists, and emphasis.`;
         { role: 'user', content: userPrompt }
       ];
 
-      const result = await openRouterClient.chat(messages);
+      const result = await openRouterClient.chat(messages, { model: this.modelKey });
       return result;
     } catch (error) {
       console.error('Error generating final report:', error);
@@ -619,7 +628,7 @@ ${content}
             if (currentDepth < depth) {
               for (const followUp of followUpQuestions.slice(0, breadth)) {
                 nextLevelQueries.push({
-                  query: followUp,
+                  query: followUp.query,
                   depth: currentDepth + 1
                 });
               }
