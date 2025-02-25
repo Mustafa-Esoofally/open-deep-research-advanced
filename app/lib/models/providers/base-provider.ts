@@ -20,6 +20,15 @@ export interface ModelResponse {
     completionTokens?: number;
     totalTokens?: number;
   };
+  metadata?: {
+    model?: string;
+    usage?: {
+      prompt_tokens: number;
+      completion_tokens: number;
+      total_tokens: number;
+    };
+    raw?: any;
+  };
   raw?: any; // Raw response for debugging
 }
 

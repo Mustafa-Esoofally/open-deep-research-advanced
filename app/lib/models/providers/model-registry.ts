@@ -1,12 +1,13 @@
 import { BaseModelProvider } from './base-provider';
-import { OpenRouterModels, OpenRouterProvider, createModelProvider } from './openrouter-provider';
+import { OpenRouterProvider, createModelProvider } from './openrouter-provider';
 
 // Type for model configuration
 export interface ModelConfig {
-  id: string;
-  name: string;
+  id: string;          // Full model ID with provider prefix (e.g., 'deepseek/deepseek-r1:free')
+  key: string;         // Short key for referencing the model (e.g., 'deepseek-r1')
+  name: string;        // Display name (e.g., 'DeepSeek R1')
   description: string;
-  provider: string;
+  provider: string;    // Provider name (e.g., 'deepseek', 'anthropic')
   contextLength: number;
   capabilities: string[];
   defaultTemperature: number;
@@ -15,28 +16,9 @@ export interface ModelConfig {
 
 // Available models with their configurations
 export const MODEL_CONFIGS: Record<string, ModelConfig> = {
-  'o1': {
-    id: OpenRouterModels.O1,
-    name: 'OpenAI o1',
-    description: 'OpenAI\'s most powerful model for advanced reasoning.',
-    provider: 'openai',
-    contextLength: 200000,
-    capabilities: ['reasoning', 'coding', 'math', 'science'],
-    defaultTemperature: 0.7,
-    defaultMaxTokens: 4000,
-  },
-  'o1-mini': {
-    id: OpenRouterModels.O1_MINI,
-    name: 'OpenAI o1-mini',
-    description: 'A smaller, faster, and more affordable variant of OpenAI o1.',
-    provider: 'openai',
-    contextLength: 128000,
-    capabilities: ['reasoning', 'coding'],
-    defaultTemperature: 0.7,
-    defaultMaxTokens: 4000,
-  },
   'deepseek-r1': {
-    id: OpenRouterModels.DEEPSEEK_R1,
+    id: 'deepseek/deepseek-r1:free',
+    key: 'deepseek-r1',
     name: 'DeepSeek R1',
     description: 'Open-source model with strong reasoning capabilities.',
     provider: 'deepseek',
@@ -45,8 +27,20 @@ export const MODEL_CONFIGS: Record<string, ModelConfig> = {
     defaultTemperature: 0.7,
     defaultMaxTokens: 4000,
   },
+  'deepseek-distill-70b': {
+    id: 'deepseek/deepseek-r1-distill-llama-70b',
+    key: 'deepseek-distill-70b',
+    name: 'DeepSeek R1 Distill 70B',
+    description: 'Fast Llama-3.3-70B-Instruct distilled with DeepSeek R1 - powered by Groq for exceptional speed.',
+    provider: 'groq',
+    contextLength: 131072,
+    capabilities: ['reasoning', 'research', 'fast-inference'],
+    defaultTemperature: 0.7,
+    defaultMaxTokens: 4000,
+  },
   'sonar-reasoning': {
-    id: OpenRouterModels.SONAR_REASONING,
+    id: 'perplexity/sonar-reasoning',
+    key: 'sonar-reasoning',
     name: 'Perplexity Sonar Reasoning',
     description: 'Reasoning model by Perplexity based on DeepSeek R1.',
     provider: 'perplexity',
@@ -56,7 +50,8 @@ export const MODEL_CONFIGS: Record<string, ModelConfig> = {
     defaultMaxTokens: 4000,
   },
   'aion-1.0': {
-    id: OpenRouterModels.AION_1_0,
+    id: 'aion-labs/aion-1.0',
+    key: 'aion-1.0',
     name: 'Aion 1.0',
     description: 'Multi-model system built on DeepSeek-R1 with augmented capabilities.',
     provider: 'aion-labs',
@@ -65,13 +60,25 @@ export const MODEL_CONFIGS: Record<string, ModelConfig> = {
     defaultTemperature: 0.7,
     defaultMaxTokens: 4000,
   },
-  'claude-sonnet-3.7': {
-    id: OpenRouterModels.CLAUDE_SONNET_3_7,
-    name: 'Claude 3.5 Sonnet',
-    description: 'Advanced model from Anthropic with strong reasoning and coding skills.',
+  'gemini-flash': {
+    id: 'google/gemini-2.0-flash-001',
+    key: 'gemini-flash',
+    name: 'Gemini Flash 2.0',
+    description: 'Fast Google model with massive 1M context window, perfect for processing large amounts of text.',
+    provider: 'google',
+    contextLength: 1000000, // 1M tokens
+    capabilities: ['reasoning', 'processing', 'summarization'],
+    defaultTemperature: 0.3, // Lower temperature for more focused processing
+    defaultMaxTokens: 4000,
+  },
+  'claude-3.7-sonnet': {
+    id: 'anthropic/claude-3.7-sonnet',
+    key: 'claude-3.7-sonnet',
+    name: 'Claude 3.7 Sonnet',
+    description: 'Fast, powerful model ideal for complex reasoning tasks.',
     provider: 'anthropic',
     contextLength: 200000,
-    capabilities: ['reasoning', 'coding', 'data science'],
+    capabilities: ['reasoning', 'analysis', 'creativity'],
     defaultTemperature: 0.7,
     defaultMaxTokens: 4000,
   }
@@ -103,6 +110,12 @@ export class ModelRegistry {
   public getModelConfig(modelKey: string): ModelConfig | undefined {
     return MODEL_CONFIGS[modelKey];
   }
+
+  // Get the model ID from a model key
+  public getModelId(modelKey: string): string | undefined {
+    const config = this.getModelConfig(modelKey);
+    return config?.id;
+  }
   
   // Get or create a provider for a specific model
   public getProvider(modelKey: string, options: any = {}): BaseModelProvider {
@@ -120,10 +133,7 @@ export class ModelRegistry {
     }
     
     // Create a new provider based on the model configuration
-    let provider: BaseModelProvider;
-    
-    // Currently all models use OpenRouter, but we can extend this for other provider types
-    provider = createModelProvider(modelConfig.id as OpenRouterModels, {
+    const provider = createModelProvider(modelConfig.id, {
       temperature: options.temperature || modelConfig.defaultTemperature,
       maxTokens: options.maxTokens || modelConfig.defaultMaxTokens,
       ...options

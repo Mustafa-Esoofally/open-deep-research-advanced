@@ -1,5 +1,62 @@
 import { openRouterClient, firecrawlApiKey, firecrawlBaseUrl, firecrawlRequestTimeout, firecrawlHeaders, defaultFirecrawlOptions } from '../clients';
+import pLimit from 'p-limit';
+import { modelRegistry } from './providers';
 import axios from 'axios';
+
+// Add a utility function for structured logging
+/**
+ * Structured logger for better debugging
+ */
+class AgentLogger {
+  private enabled: boolean;
+  
+  constructor() {
+    this.enabled = process.env.NODE_ENV === 'development';
+  }
+  
+  /**
+   * Log an informational message with optional data
+   */
+  info(message: string, data?: any): void {
+    if (!this.enabled) return;
+    
+    const timestamp = new Date().toISOString().substring(11, 19);
+    if (data) {
+      console.log(`[${timestamp}] 🔍 [Research] ${message}`, data);
+    } else {
+      console.log(`[${timestamp}] 🔍 [Research] ${message}`);
+    }
+  }
+  
+  /**
+   * Log a warning with optional data
+   */
+  warn(message: string, data?: any): void {
+    if (!this.enabled) return;
+    
+    const timestamp = new Date().toISOString().substring(11, 19);
+    if (data) {
+      console.warn(`[${timestamp}] ⚠️ [Research] ${message}`, data);
+    } else {
+      console.warn(`[${timestamp}] ⚠️ [Research] ${message}`);
+    }
+  }
+  
+  /**
+   * Log an error with optional data
+   */
+  error(message: string, error?: any): void {
+    // Always log errors regardless of env
+    const timestamp = new Date().toISOString().substring(11, 19);
+    if (error) {
+      console.error(`[${timestamp}] ❌ [Research] ${message}`, error);
+    } else {
+      console.error(`[${timestamp}] ❌ [Research] ${message}`);
+    }
+  }
+}
+
+const logger = new AgentLogger();
 
 // Progress types
 export interface ResearchProgress {
@@ -58,7 +115,8 @@ export class UnifiedResearchAgent {
   } = {}) {
     this.progressCallback = config.progressCallback;
     this.abortController = new AbortController();
-    this.modelKey = config.modelKey || process.env.DEFAULT_MODEL_KEY || 'o1-mini';
+    this.modelKey = config.modelKey || process.env.DEFAULT_MODEL_KEY || 'deepseek-r1';
+    logger.info(`Agent initialized with model: ${this.modelKey}`);
   }
 
   /**
@@ -88,116 +146,64 @@ export class UnifiedResearchAgent {
   /**
    * Search the web using Firecrawl API
    */
-  private async searchWeb(query: string): Promise<{ results: any[]; success: boolean; sources: Source[] }> {
-    const maxRetries = 2;
-    let retries = 0;
-    
-    while (retries <= maxRetries) {
-      try {
-        this.reportProgress({ 
-          progress: 20, 
-          status: 'Searching the web...' 
-        });
-        
-        console.log(`Starting Firecrawl search for: "${query}" (attempt ${retries + 1}/${maxRetries + 1})`);
-        
-        // Construct the search endpoint from the base URL
-        const endpoint = `${firecrawlBaseUrl}/search`;
-        
-        // Format request according to Firecrawl API
-        const requestPayload = {
-          query,
-          ...defaultFirecrawlOptions,
-          timeout: Math.floor(firecrawlRequestTimeout * 0.75) // 75% of the total timeout
-        };
-        
-        const response = await axios.post(endpoint, 
-          requestPayload,
-          {
-            headers: firecrawlHeaders,
-            timeout: firecrawlRequestTimeout
-          }
-        );
-        
-        // Validate response data structure
-        if (
-          response.data && 
-          response.data.data && 
-          Array.isArray(response.data.data) && 
-          response.data.data.length > 0
-        ) {
-          this.reportProgress({ 
-            progress: 40, 
-            status: `Found ${response.data.data.length} search results` 
-          });
+  private async searchWeb(query: string): Promise<{ results: any[]; sources: Source[] }> {
+    try {
+      logger.info(`Searching web for: "${query.substring(0, 50)}${query.length > 50 ? '...' : ''}"`);
+      
+      // Construct the search endpoint
+      const endpoint = `${firecrawlBaseUrl}/search`;
+      
+      // Format request according to Firecrawl API
+      const requestPayload = {
+        query,
+        ...defaultFirecrawlOptions,
+        timeout: Math.floor(firecrawlRequestTimeout * 0.75) // 75% of the total timeout
+      };
 
-          // Extract sources from the results
-          const sources = response.data.data.map((result: any) => {
-            const url = result.url || '';
-            let domain = '';
-            let favicon = '';
-            
-            if (url) {
-              try {
-                const urlObj = new URL(url);
-                domain = urlObj.hostname.replace('www.', '');
-                favicon = `https://www.google.com/s2/favicons?domain=${urlObj.hostname}&sz=32`;
-              } catch (e) {
-                // Ignore URL parsing errors
-              }
-            }
-            
-            return {
-              title: result.title || 'Untitled',
-              url,
-              domain,
-              favicon,
-              relevance: 0.9 // Default relevance score
-            };
-          }).filter((source: Source) => source.url);
-          
-          return { 
-            results: response.data.data, 
-            success: true, 
-            sources 
-          };
+      const response = await axios.post(
+        endpoint, 
+        requestPayload,
+        {
+          headers: firecrawlHeaders,
+          timeout: firecrawlRequestTimeout,
+          signal: this.abortController.signal
+        }
+      );
+      
+      if (
+        response.data && 
+        response.data.data && 
+        Array.isArray(response.data.data)
+      ) {
+        const results = response.data.data;
+        
+        // Extract sources from results
+        const sources: Source[] = results
+          .map((result: any) => ({
+            title: result.title || 'Untitled',
+            url: result.url || '',
+            snippet: result.snippet || result.description || ''
+          }))
+          .filter((source: Source) => source.url); // Filter out entries without URLs
+        
+        if (results.length === 0) {
+          logger.warn(`No results found for query: "${query.substring(0, 30)}..."`);
         } else {
-          // Handle empty results
-          console.warn('Firecrawl returned empty results or unexpected response format');
-          
-          if (retries < maxRetries) {
-            retries++;
-            console.log(`Retrying search (${retries}/${maxRetries})...`);
-            // Wait before retrying with increasing delay
-            await new Promise(resolve => setTimeout(resolve, 1000 * retries));
-            continue;
-          }
-          
-          return { 
-            results: [], 
-            success: false,
-            sources: []
-          };
-        }
-      } catch (error: any) {
-        console.error('Firecrawl search error:', error);
-        
-        if (retries < maxRetries) {
-          retries++;
-          await new Promise(resolve => setTimeout(resolve, 1000 * retries));
-          continue;
+          logger.info(`Found ${results.length} results for web search`, {
+            query: query.substring(0, 30),
+            sourceCount: sources.length
+          });
         }
         
-        return { 
-          results: [], 
-          success: false,
-          sources: []
-        };
+        return { results, sources };
+      } else {
+        logger.warn('API returned empty or invalid results');
+        return { results: [], sources: [] };
       }
+    } catch (error) {
+      logger.error('Error searching web:', error);
+      return { results: [], sources: [] };
     }
-    
-    // This should be unreachable but keeps TypeScript happy
-    return { results: [], success: false, sources: [] };
   }
 
   /**
@@ -205,6 +211,8 @@ export class UnifiedResearchAgent {
    */
   private async generateSerpQueries(query: string, numQueries = 3, learnings?: string[]): Promise<Array<{query: string; researchGoal: string}>> {
     try {
+      logger.info(`Generating search queries for: "${query.substring(0, 40)}..."`);
+      
       const systemMessage = {
         role: 'system',
         content: DEFAULT_SYSTEM_PROMPT
@@ -248,22 +256,26 @@ Return your response as a valid JSON object with this structure:
         const parsed = JSON.parse(jsonStr);
         
         if (parsed && Array.isArray(parsed.queries)) {
-          console.log(`Generated ${parsed.queries.length} queries`);
-          return parsed.queries.slice(0, numQueries);
+          const queries = parsed.queries.slice(0, numQueries);
+          logger.info(`Generated ${queries.length} search queries`, {
+            queries: queries.map((q: { query: string }) => q.query)
+          });
+          return queries;
         } else {
           throw new Error('Invalid response format - no queries array found');
         }
       } catch (parseError) {
-        console.error('Error parsing response:', parseError);
+        logger.error('Error parsing AI response for queries', parseError);
         
         // Create a fallback query if parsing fails
+        logger.info('Using fallback query (original user query)');
         return [{
           query: query,
           researchGoal: "Directly answering the user's original query"
         }];
       }
     } catch (error) {
-      console.error('Error generating SERP queries:', error);
+      logger.error('Error generating SERP queries:', error);
       
       // Return the original query as a fallback
       return [{
@@ -431,6 +443,11 @@ Your report should be well-formatted in Markdown with appropriate headings, bull
         learnings.map(learning => `- ${learning}`).join('\n'),
         150000
       );
+      
+      // Log learnings count only in development mode
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`Generating final report using ${learnings.length} learnings`);
+      }
 
       const userPrompt = `Given the following user query, write a comprehensive final report using the learnings from research. 
       
@@ -455,8 +472,9 @@ Format the report in Markdown with appropriate headings, lists, and emphasis.`;
       const result = await openRouterClient.chat(messages, { model: this.modelKey });
       return result;
     } catch (error) {
-      console.error('Error generating final report:', error);
-      return `Sorry, I encountered an error while generating the final research report for: "${query}". Here are the key points I found:\n\n${learnings.map(l => `- ${l}`).join('\n')}`;
+      console.error('Error generating final report:', error instanceof Error ? error.message : 'Unknown error');
+      // Return a more user-friendly error message with the learnings
+      return `# Research Report: ${query}\n\n## Summary\n\nThere was an error generating the complete research report.\n\n## Raw Findings\n\n${learnings.map(l => `- ${l}`).join('\n')}\n\n## Sources\n\n${sources.map(s => `- [${s.title}](${s.url})`).join('\n')}`;
     }
   }
 
@@ -481,38 +499,338 @@ ${content}
   }
 
   /**
+   * Stream reasoning traces to provide visibility into the thought process
+   */
+  private streamReasoningTrace(trace: string): string {
+    logger.info('Streaming reasoning trace', {
+      length: trace.length,
+      preview: trace.substring(0, 40) + '...'
+    });
+    
+    return JSON.stringify({
+      type: 'reasoning_trace',
+      content: trace
+    }) + '\n';
+  }
+
+  /**
+   * Stream a progress update to the client
+   */
+  private streamProgress(progress: ResearchProgress): string {
+    logger.info('Progress update', {
+      progress: progress.progress || 0,
+      status: progress.status
+    });
+    
+    if (progress.currentQuery) {
+      logger.info(`Current query: "${progress.currentQuery.substring(0, 50)}${progress.currentQuery.length > 50 ? '...' : ''}"`);
+    }
+    
+    // Create a standardized progress message for streaming
+    const progressData = {
+      type: 'progress',
+      progress: progress.progress || 0,
+      status: progress.status || 'Researching...'
+    };
+    
+    // Add details for deep research if available
+    if (progress.currentDepth !== undefined && progress.totalDepth !== undefined) {
+      Object.assign(progressData, {
+        details: {
+          depth: {
+            current: progress.currentDepth,
+            total: progress.totalDepth
+          },
+          breadth: {
+            current: progress.currentBreadth || 0,
+            total: progress.totalBreadth || 0
+          },
+          queries: {
+            current: progress.completedQueries || 0,
+            total: progress.totalQueries,
+            currentQuery: progress.currentQuery
+          }
+        }
+      });
+    }
+    
+    return JSON.stringify(progressData) + '\n';
+  }
+
+  /**
    * Process a query with regular research (single search + analysis)
    */
   private async *doRegularResearch(query: string): AsyncGenerator<string> {
     // Step 1: Search the web
     this.reportProgress({ progress: 10, status: 'Searching the web...' });
-    const { results, sources } = await this.searchWeb(query);
+    yield this.streamReasoningTrace(`Searching the web for information about: "${query}"`);
     
-    // Stream the search results back to the client
-    if (results.length > 0) {
+    const startTime = Date.now();
+    let webSearchSucceeded = true;
+    
+    let sources: Source[] = [];
+    let results: any[] = [];
+    
+    try {
+      const searchResults = await this.searchWeb(query);
+      results = searchResults.results;
+      sources = searchResults.sources;
+      
+      if (results.length === 0) {
+        throw new Error('No search results found');
+      }
+      
+      const searchTime = Date.now() - startTime;
+      yield this.streamReasoningTrace(`Found ${results.length} search results in ${(searchTime/1000).toFixed(1)} seconds.`);
+      
+      // Send search results in the stream
       yield JSON.stringify({
         type: 'search_results',
         content: this.formatSearchResults(results)
       }) + '\n';
       
-      // Stream the sources
+      // Send source information
+      for (const source of sources) {
+        yield JSON.stringify({
+          type: 'source_update',
+          url: source.url,
+          data: source
+        }) + '\n';
+      }
+    } catch (error) {
+      webSearchSucceeded = false;
+      console.error('Web search error:', error);
+      yield this.streamReasoningTrace(`Search engine lookup failed. Proceeding with limited information.`);
+      
+      // Continue even if web search fails
+      // Just report the error to the client
       yield JSON.stringify({
-        type: 'sources',
-        sources
+        type: 'search_results',
+        content: 'Search engine lookup failed. Will attempt to proceed with limited information.'
       }) + '\n';
     }
     
-    // Step 2: Generate the research report
-    this.reportProgress({ progress: 50, status: 'Analyzing search results and generating report...' });
-    const formattedResults = this.formatSearchResults(results);
-    const { content } = await this.generateResearchReport(query, formattedResults, sources);
+    // Step 2: Process the results with streaming
+    this.reportProgress({ progress: 50, status: `Analyzing search results with ${this.getModelDisplayName()}...` });
     
-    // Stream the final response
-    this.reportProgress({ progress: 100, status: 'Complete' });
-    yield JSON.stringify({
-      type: 'content',
-      content
-    }) + '\n';
+    // Use the streaming model processing instead of waiting for the full response
+    // Stream chunks directly to the client
+    let processedContent = '';
+    for await (const chunk of this.streamProcessWithSelectedModel(query, results)) {
+      yield chunk; // Forward the stream chunks directly
+      
+      // Try to parse the chunk to extract content if it's a content_chunk type
+      try {
+        const parsed = JSON.parse(chunk);
+        if (parsed.type === 'content_chunk' && parsed.content) {
+          processedContent += parsed.content;
+        }
+      } catch (e) {
+        // Ignore parsing errors
+      }
+    }
+    
+    // Log processing time (development only)
+    const processingTime = Date.now() - startTime;
+    if (processingTime > 5000 && process.env.NODE_ENV === 'development') {
+      console.log(`Processing completed in ${(processingTime/1000).toFixed(1)}s`);
+    }
+    
+    yield this.streamReasoningTrace(`Analyzed search results in ${(processingTime/1000).toFixed(1)} seconds.`);
+    
+    // Step 3: Generate final research report using processed results
+    if (processedContent) {
+      this.reportProgress({ progress: 70, status: 'Generating comprehensive research report...' });
+      const reportStartTime = Date.now();
+      
+      yield this.streamReasoningTrace(`Generating comprehensive research report that synthesizes findings...`);
+      
+      const { content } = await this.generateResearchReport(query, processedContent, sources);
+      
+      const reportTime = Date.now() - reportStartTime;
+      yield this.streamReasoningTrace(`Research report generated in ${(reportTime/1000).toFixed(1)} seconds.`);
+      
+      // Stream the final response
+      this.reportProgress({ progress: 100, status: 'Complete' });
+      yield JSON.stringify({
+        type: 'content',
+        content
+      }) + '\n';
+    } else {
+      // If we failed to get processed content, report an error
+      yield JSON.stringify({
+        type: 'error',
+        content: 'Failed to generate research results. Please try again with a different query.'
+      }) + '\n';
+    }
+  }
+  
+  /**
+   * Get a display name for the currently selected model
+   */
+  private getModelDisplayName(): string {
+    const modelConfig = modelRegistry.getModelConfig(this.modelKey);
+    return modelConfig ? modelConfig.name : this.modelKey;
+  }
+  
+  /**
+   * Process with the selected model instead of middleware
+   */
+  private async processWithSelectedModel(query: string, rawResults: any[]): Promise<string> {
+    try {
+      // Format the search results
+      const formattedResults = this.formatSearchResults(rawResults);
+      
+      // Create the prompt for the selected model
+      const modelConfig = modelRegistry.getModelConfig(this.modelKey);
+      const maxPrompLength = modelConfig?.contextLength || 4000;
+      const truncatedResults = this.trimPrompt(formattedResults, maxPrompLength);
+      
+      // Log token size info only in development mode
+      if (process.env.NODE_ENV === 'development') {
+        const approximateTokens = Math.ceil(truncatedResults.length / 4);
+        if (approximateTokens > 10000) {
+          console.log(`Approximate tokens for formatted results: ~${approximateTokens}`);
+        }
+      }
+      
+      // The prompt to analyze search results
+      const prompt = `
+You are a world-class research analyst tasked with generating a concise, insightful, and deeply researched report.
+
+RESEARCH QUERY: ${query}
+
+The following are search results collected from the web. Please analyze these results thoroughly and generate a comprehensive report that:
+
+1. Synthesizes information from multiple sources
+2. Provides well-reasoned analysis and insights 
+3. Cites specific sources when referring to data or claims
+4. Is organized with clear sections and a coherent structure
+5. Highlights contrasting viewpoints where they exist
+6. Provides actionable conclusions or recommendations
+7. Notes any limitations in the available information
+
+SEARCH RESULTS:
+${truncatedResults}
+
+Your response should be a complete, well-formatted report that could be presented to executives or academics. Use markdown formatting.
+      `;
+      
+      // Call the selected model with the prompt
+      const messages = [
+        { role: 'system', content: DEFAULT_SYSTEM_PROMPT },
+        { role: 'user', content: prompt }
+      ];
+      
+      try {
+        // Only log in development mode
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`Processing with model: ${this.modelKey}`);
+        }
+        
+        // Use the existing chat method to call the model
+        const result = await openRouterClient.chat(messages, { model: this.modelKey });
+        
+        if (!result) {
+          throw new Error("Empty response from model");
+        }
+        
+        // Return the response content directly as the API now returns the content
+        return result;
+      } catch (error) {
+        // Log model-specific errors but don't expose full error details
+        console.error(`Error with model ${this.modelKey}:`, error instanceof Error ? error.message : 'Unknown error');
+        throw error; // Re-throw to be caught by the outer try/catch
+      }
+    } catch (error) {
+      console.error('Error processing with selected model:', error instanceof Error ? error.message : 'Unknown error');
+      return "An error occurred while processing search results with the selected model.";
+    }
+  }
+
+  /**
+   * Process with the selected model with streaming support
+   */
+  private async *streamProcessWithSelectedModel(query: string, rawResults: any[]): AsyncGenerator<string> {
+    try {
+      // Format the search results
+      const formattedResults = this.formatSearchResults(rawResults);
+      
+      // Create the prompt for the selected model
+      const modelConfig = modelRegistry.getModelConfig(this.modelKey);
+      const maxPrompLength = modelConfig?.contextLength || 4000;
+      const truncatedResults = this.trimPrompt(formattedResults, maxPrompLength);
+      
+      // The prompt to analyze search results
+      const prompt = `
+You are a world-class research analyst tasked with generating a concise, insightful, and deeply researched report.
+
+RESEARCH QUERY: ${query}
+
+The following are search results collected from the web. Please analyze these results thoroughly and generate a comprehensive report that:
+
+1. Synthesizes information from multiple sources
+2. Provides well-reasoned analysis and insights 
+3. Cites specific sources when referring to data or claims
+4. Is organized with clear sections and a coherent structure
+5. Highlights contrasting viewpoints where they exist
+6. Provides actionable conclusions or recommendations
+7. Notes any limitations in the available information
+
+SEARCH RESULTS:
+${truncatedResults}
+
+Your response should be a complete, well-formatted report that could be presented to executives or academics. Use markdown formatting.
+      `;
+      
+      // Call the selected model with the prompt
+      const messages = [
+        { role: 'system', content: DEFAULT_SYSTEM_PROMPT },
+        { role: 'user', content: prompt }
+      ];
+      
+      // Use streaming to process the response
+      yield JSON.stringify({
+        type: 'reasoning_trace',
+        content: `Starting to stream analysis from ${this.getModelDisplayName()}...`
+      }) + '\n';
+      
+      // Process stream from OpenRouter
+      let fullContent = '';
+      try {
+        // Use the streamChat method
+        for await (const chunk of openRouterClient.streamChat(messages, { model: this.modelKey })) {
+          if (chunk) {
+            fullContent += chunk;
+            
+            // Stream each chunk to the client
+            yield JSON.stringify({
+              type: 'content_chunk',
+              content: chunk
+            }) + '\n';
+          }
+        }
+        
+        // Return the complete content
+        return fullContent;
+      } catch (error) {
+        console.error(`Streaming error with model ${this.modelKey}:`, error instanceof Error ? error.message : 'Unknown error');
+        
+        // If we've received some content, return it even if streaming failed
+        if (fullContent) {
+          return fullContent;
+        }
+        
+        throw error; // Re-throw if we have no content
+      }
+    } catch (error) {
+      console.error('Error processing with selected model:', error instanceof Error ? error.message : 'Unknown error');
+      yield JSON.stringify({
+        type: 'error',
+        content: 'An error occurred while processing search results with the model.'
+      }) + '\n';
+      return "An error occurred while processing search results with the selected model.";
+    }
   }
 
   /**
@@ -521,6 +839,15 @@ ${content}
   private async *doDeepResearch(query: string, options: { depth: number; breadth: number }): AsyncGenerator<string> {
     const depth = Math.min(Math.max(1, options.depth), 5); // Limit depth between 1-5
     const breadth = Math.min(Math.max(2, options.breadth), 5); // Limit breadth between 2-5
+    
+    // Stream initial reasoning trace
+    yield this.streamReasoningTrace(`Starting deep research for query: "${query}" with depth=${depth}, breadth=${breadth}`);
+    yield this.streamReasoningTrace(`Deep research enables a more thorough analysis by exploring multiple angles and sub-questions.`);
+    
+    // Only log configuration in development mode
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`Starting deep research with depth=${depth}, breadth=${breadth}`);
+    }
     
     const allLearnings: string[] = [];
     const visitedQueries = new Set<string>();
@@ -546,6 +873,8 @@ ${content}
       let currentDepth = 1;
       let queriesToProcess: {query: string; depth: number}[] = [{query, depth: 1}];
       
+      yield this.streamReasoningTrace(`Preparing initial query and planning research strategy...`);
+      
       while (queriesToProcess.length > 0 && currentDepth <= depth) {
         // Get all queries at the current depth level
         const currentLevelQueries = queriesToProcess.filter(q => q.depth === currentDepth);
@@ -556,9 +885,9 @@ ${content}
         progressData.status = `Researching depth ${currentDepth}/${depth}`;
         this.reportProgress(progressData);
         
-        // Process all queries at this depth level
-        const nextLevelQueries: {query: string; depth: number}[] = [];
+        yield this.streamReasoningTrace(`Starting depth ${currentDepth}/${depth} of research with ${currentLevelQueries.length} queries to explore.`);
         
+        // Process each query at this depth level
         for (let i = 0; i < currentLevelQueries.length; i++) {
           const { query: currentQuery } = currentLevelQueries[i];
           
@@ -571,78 +900,144 @@ ${content}
           progressData.status = `Researching: "${currentQuery}" (depth ${currentDepth}/${depth})`;
           this.reportProgress(progressData);
           
-          // Generate search queries for this topic
-          const generatedQueries = await this.generateSerpQueries(
-            currentQuery, 
-            breadth, 
-            allLearnings
-          );
+          yield this.streamReasoningTrace(`Researching sub-question: "${currentQuery}" (${i+1}/${currentLevelQueries.length} at depth ${currentDepth})`);
           
-          // Update total queries count
-          progressData.totalQueries += generatedQueries.length;
-          
-          // Process each generated query
-          for (let j = 0; j < generatedQueries.length; j++) {
-            const generatedQuery = generatedQueries[j];
-            progressData.currentBreadth = j + 1;
-            progressData.currentQuery = generatedQuery.query;
-            progressData.status = `Researching: ${generatedQuery.query} (${j+1}/${generatedQueries.length})`;
-            this.reportProgress(progressData);
+          try {
+            // Generate search queries for this topic
+            yield this.streamReasoningTrace(`Generating targeted search queries based on the sub-question...`);
             
-            // Search the web
-            const { results, sources } = await this.searchWeb(generatedQuery.query);
-            
-            // Add sources to the collection
-            for (const source of sources) {
-              if (!visitedUrls.has(source.url)) {
-                visitedUrls.add(source.url);
-                allSources.push(source);
-                
-                // Stream sources back to the client
-                yield JSON.stringify({
-                  type: 'sources',
-                  sources: [source]
-                }) + '\n';
-              }
-            }
-            
-            // Process the search results
-            const { learnings, followUpQuestions } = await this.processSerpResult(
-              generatedQuery.query, 
-              results, 
-              Math.max(2, Math.floor(5 / depth)), // Adjust learnings based on depth
-              Math.max(1, Math.floor(3 / depth))  // Adjust follow-ups based on depth
+            const generatedQueries = await this.generateSerpQueries(
+              currentQuery, 
+              breadth, 
+              allLearnings
             );
             
-            // Add and stream learnings
-            for (const learning of learnings) {
-              allLearnings.push(learning);
-              
-              yield JSON.stringify({
-                type: 'learning',
-                content: learning
-              }) + '\n';
-            }
+            // Update total queries count
+            progressData.totalQueries += generatedQueries.length;
             
-            // Queue follow-up questions for the next depth
-            if (currentDepth < depth) {
-              for (const followUp of followUpQuestions.slice(0, breadth)) {
-                nextLevelQueries.push({
-                  query: followUp.query,
-                  depth: currentDepth + 1
-                });
+            yield this.streamReasoningTrace(`Generated ${generatedQueries.length} search queries to explore different aspects of the question.`);
+
+            // Process each generated query
+            const limit = pLimit(CONCURRENCY_LIMIT);
+            const searchPromises = generatedQueries.map((genQuery, index) => {
+              return limit(async () => {
+                try {
+                  progressData.currentBreadth = index + 1;
+                  progressData.totalBreadth = generatedQueries.length;
+                  progressData.status = `Researching (${index + 1}/${generatedQueries.length}): ${genQuery.query}`;
+                  progressData.currentQuery = genQuery.query;
+                  this.reportProgress(progressData);
+                  
+                  // We'll capture trace messages and return them since we can't yield inside this async function
+                  const traceMessages: string[] = [];
+                  traceMessages.push(`Searching for: "${genQuery.query}" (${index + 1}/${generatedQueries.length})`);
+                  traceMessages.push(`Search goal: ${genQuery.researchGoal}`);
+                  
+                  // Perform the search
+                  const { results, sources } = await this.searchWeb(genQuery.query);
+                  const numResults = results.length;
+                  
+                  traceMessages.push(`Found ${numResults} search results for query "${genQuery.query}"`);
+                  
+                  // Add to visited URLs
+                  sources.forEach(source => {
+                    if (source.url) visitedUrls.add(source.url);
+                  });
+                  
+                  // Add to all sources
+                  allSources.push(...sources);
+                  
+                  // Process the results
+                  let extractedLearnings: string[] = [];
+                  let extractedFollowUps: {query: string; depth: number}[] = [];
+                  
+                  if (numResults > 0) {
+                    traceMessages.push(`Extracting key learnings from search results...`);
+                    
+                    // Extract learnings
+                    const { learnings, followUpQuestions } = await this.processSerpResult(
+                      genQuery.query,
+                      results,
+                      5, // numLearnings
+                      3  // numFollowUpQuestions
+                    );
+                    
+                    // Add learnings
+                    if (learnings && learnings.length > 0) {
+                      extractedLearnings = learnings;
+                      traceMessages.push(`Extracted ${learnings.length} key insights from search results.`);
+                    }
+                    
+                    // Prepare follow-up questions for the next depth level
+                    if (followUpQuestions && followUpQuestions.length > 0 && currentDepth < depth) {
+                      extractedFollowUps = followUpQuestions.map(q => ({
+                        query: q.query,
+                        depth: currentDepth + 1
+                      }));
+                      
+                      traceMessages.push(`Generated ${followUpQuestions.length} follow-up questions for deeper research.`);
+                    }
+                  }
+                  
+                  progressData.completedQueries++;
+                  const overallProgress = Math.min(
+                    90,
+                    20 + (70 * ((currentDepth - 1) / depth + progressData.completedQueries / progressData.totalQueries / depth))
+                  );
+                  progressData.progress = Math.floor(overallProgress);
+                  this.reportProgress(progressData);
+                  
+                  return { 
+                    success: true, 
+                    traceMessages,
+                    learnings: extractedLearnings,
+                    followUps: extractedFollowUps
+                  };
+                } catch (error) {
+                  console.error(`Error processing query "${genQuery.query}":`, 
+                    error instanceof Error ? error.message : 'Unknown error');
+                  return { 
+                    success: false, 
+                    error,
+                    traceMessages: [`Error processing query "${genQuery.query}": ${error instanceof Error ? error.message : 'Unknown error'}`]
+                  };
+                }
+              });
+            });
+            
+            // Wait for all search tasks to complete
+            const results = await Promise.all(searchPromises);
+            
+            // Now we can safely yield the trace messages and process the results
+            for (const result of results) {
+              // Stream all trace messages
+              for (const trace of result.traceMessages || []) {
+                yield this.streamReasoningTrace(trace);
+              }
+              
+              // Add learnings and stream them
+              if (result.learnings && result.learnings.length > 0) {
+                allLearnings.push(...result.learnings);
+                
+                // Stream the learnings
+                yield JSON.stringify({
+                  type: 'learnings',
+                  content: result.learnings.join('\n')
+                }) + '\n';
+              }
+              
+              // Add follow-up questions
+              if (result.followUps && result.followUps.length > 0) {
+                queriesToProcess.push(...result.followUps);
               }
             }
-            
-            // Update progress
-            progressData.completedQueries++;
-            progressData.progress = Math.round((progressData.completedQueries / Math.max(progressData.totalQueries, 1)) * 100);
-            this.reportProgress(progressData);
+          } catch (topicError) {
+            // Log the error but continue with the next topic
+            console.error(`Error researching topic "${currentQuery}":`, 
+              topicError instanceof Error ? topicError.message : 'Unknown error');
+            yield this.streamReasoningTrace(`Error researching topic "${currentQuery}": ${topicError instanceof Error ? topicError.message : 'Unknown error'}`);
           }
         }
-        
-        // Add the next level queries to our queue
-        queriesToProcess = [...queriesToProcess, ...nextLevelQueries];
         
         // Move to the next depth
         currentDepth++;
@@ -666,12 +1061,31 @@ ${content}
       progressData.progress = 100;
       this.reportProgress(progressData);
       
+      // Log the completion in development mode
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`Deep research completed: ${allLearnings.length} learnings, ${visitedUrls.size} sources`);
+      }
+      
     } catch (error) {
-      console.error('Deep research error:', error);
+      // Log the top-level error with improved message
+      console.error(`Deep research error for query "${query}":`, 
+        error instanceof Error ? error.message : 'Unknown error');
+      
+      // Return a more detailed error to the client
       yield JSON.stringify({
         type: 'error',
-        content: 'An error occurred during deep research.'
+        content: `An error occurred during deep research. We found ${allLearnings.length} insights before the error occurred.`
       }) + '\n';
+      
+      // If we have some results, still return them
+      if (allLearnings.length > 0) {
+        const partialReport = `# Partial Research Report: ${query}\n\n## Note\n\nAn error occurred during the research process, but here are the insights we gathered before the error:\n\n${allLearnings.map(l => `- ${l}`).join('\n')}\n\n## Sources\n\n${Array.from(visitedUrls).map(url => `- ${url}`).join('\n')}`;
+        
+        yield JSON.stringify({
+          type: 'content',
+          content: partialReport
+        }) + '\n';
+      }
     }
   }
 
@@ -704,7 +1118,8 @@ ${content}
         }
       }
     } catch (error) {
-      console.error('Error in processQueryStream:', error);
+      // Only log unexpected errors that weren't caught by deeper methods
+      console.error('Unhandled error in processQueryStream:', error);
       yield JSON.stringify({
         type: 'error',
         content: 'An error occurred during research. Please try again.'

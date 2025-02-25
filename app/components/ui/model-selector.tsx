@@ -23,11 +23,11 @@ export function ModelSelector({
   showDescription = true,
   label = 'Model'
 }: ModelSelectorProps) {
-  const [selectedModel, setSelectedModel] = useState<string>(value || 'o1-mini');
+  const [selectedModel, setSelectedModel] = useState<string>(value || 'deepseek-r1');
   
   // Get ordered models
-  const models = Object.entries(MODEL_CONFIGS).map(([key, config]) => ({
-    key,
+  const models = Object.entries(MODEL_CONFIGS).map(([modelKey, config]) => ({
+    modelKey,
     ...config
   }));
   
@@ -83,8 +83,8 @@ export function ModelSelector({
               <SelectLabel className="capitalize">{provider}</SelectLabel>
               {modelsByProvider[provider].map(model => (
                 <SelectItem 
-                  key={model.key} 
-                  value={model.key}
+                  key={model.modelKey} 
+                  value={model.modelKey}
                   title={showDescription ? model.description : undefined}
                 >
                   {model.name}

@@ -13,8 +13,8 @@ const MODEL_STORAGE_KEY = 'selected_model';
  * and whether the selection is currently loading.
  */
 export function useModelSelection() {
-  // Default model from environment or fallback to o1-mini
-  const defaultModel = env.DEFAULT_MODEL_KEY || 'o1-mini';
+  // Default model from environment or fallback to deepseek-r1
+  const defaultModel = env.DEFAULT_MODEL_KEY || 'deepseek-r1';
   
   // State for tracking selected model and loading state
   const [selectedModel, setSelectedModel] = useState<string>(defaultModel);
@@ -56,9 +56,16 @@ export function useModelSelection() {
     }
   };
 
+  // Get the full model ID (including provider prefix) from the registry
+  const getFullModelId = () => {
+    const modelConfig = modelRegistry.getModelConfig(selectedModel);
+    return modelConfig?.id || selectedModel;
+  };
+
   return {
     selectedModel,
     updateModel,
-    isLoading
+    isLoading,
+    modelId: getFullModelId() // Return the full model ID
   };
 } 

@@ -297,19 +297,9 @@ This is based on my existing knowledge rather than real-time web search results.
 
   // Process the query with OpenRouter LLM
   private async processWithLLM(query: string, searchResults: string, webSearchSucceeded: boolean): Promise<string> {
-    this.reportProgress(60, 'Analyzing with OpenRouter...');
-
-    // Different prompt templates based on whether web search succeeded
-    let systemPrompt = '';
-    if (webSearchSucceeded) {
-      systemPrompt = `
-You are a professional research assistant tasked with analyzing web search results and creating a comprehensive research report.
-
-QUERY:
-{query}
-
-SEARCH RESULTS:
-{searchResults}
+    this.reportProgress(60, 'Processing results with AI model...');
+    
+    let systemPrompt = `You are a professional research assistant tasked with analyzing web search results and creating a comprehensive research report.
 
 Your task is to:
 1. Analyze and synthesize the search results
@@ -323,44 +313,25 @@ Format your response in clear, well-structured markdown with the following secti
 - Main Findings: Detailed information organized by subtopics
 - Analysis: Your interpretation and synthesis of the information
 - Conclusion: Summary of key points
-- Sources: List of sources used with URLs
+- Sources: List of sources used with URLs (if available)
 
-Always cite your sources throughout the text using [Source: URL] format.`;
-    } else {
-      systemPrompt = `
-You are a professional research assistant tasked with creating a comprehensive research report.
+Always cite your sources throughout the text where appropriate.`;
 
-QUERY:
-{query}
-
-NOTE: Live web search is currently unavailable. Please use your knowledge to create a report.
-
-Your task is to:
-1. Create a well-structured research report based on your knowledge
-2. Provide the most up-to-date information you have on the topic
-3. Be transparent about limitations in your knowledge
-4. Maintain academic rigor and objectivity
-
-Format your response in clear, well-structured markdown with the following sections:
-- Introduction: Brief overview of the topic
-- Main Findings: Detailed information organized by subtopics
-- Analysis: Your interpretation and synthesis of the information
-- Conclusion: Summary of key points
-- Limitations: A note that this report is based on your knowledge rather than real-time research
+    if (!webSearchSucceeded) {
+      systemPrompt += `
 
 Begin by clearly stating that this report is based on your knowledge as of your last update, not on real-time web search.`;
     }
 
-    const prompt = ChatPromptTemplate.fromTemplate(systemPrompt);
-
     try {
-      const response = await prompt.pipe(openRouterAdapter).invoke({
+      // Instead of using the pipe method, we'll directly use our adapter
+      const response = await openRouterAdapter.invoke({
         query,
         searchResults
       });
 
       this.reportProgress(80, 'Research report generated successfully');
-      return response.content as string;
+      return response?.content as string || '';
     } catch (error) {
       console.error('OpenRouter processing error:', error);
       throw error;
