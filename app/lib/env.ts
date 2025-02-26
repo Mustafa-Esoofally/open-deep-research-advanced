@@ -22,6 +22,17 @@ export function validateEnv(): { valid: boolean; missing: string[] } {
     }
   }
 
+  // In development mode, log more helpful information
+  if (process.env.NODE_ENV === 'development' && missing.length > 0) {
+    console.error(`\n⚠️ Missing environment variables in development mode: ${missing.join(', ')}`);
+    console.error(`Make sure you have these variables in your .env.local file in the project root.`);
+    console.error(`Add them to your .env.local file in this format:\n`);
+    for (const missingVar of missing) {
+      console.error(`${missingVar}=your-value-here`);
+    }
+    console.error(`\nThen restart your development server.\n`);
+  }
+
   return {
     valid: missing.length === 0,
     missing
@@ -105,6 +116,8 @@ if (!envStatus.valid) {
   console.error(`⚠️ Missing required environment variables: ${envStatus.missing.join(', ')}`);
   console.error(`Check that you've created .env.local in the project root with these variables.`);
   
+  // Only throw an error in production mode
+  // In development, we'll show a warning but allow the app to start
   if (process.env.NODE_ENV === 'production') {
     throw new Error(`Missing required environment variables: ${envStatus.missing.join(', ')}`);
   }
