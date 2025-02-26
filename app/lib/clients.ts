@@ -1,28 +1,25 @@
 import { ChatOpenAI } from '@langchain/openai';
 import axios from 'axios';
 import { set } from 'zod';
-import { env, refreshEnv } from './env';
-
-// Get a fresh copy of environment variables
-const runtimeEnv = refreshEnv();
+import { env } from './env';
 
 // Use environment variables from our validated env utility
-const OPENROUTER_API_KEY = runtimeEnv.OPENROUTER_API_KEY;
-const FIRECRAWL_API_KEY = runtimeEnv.FIRECRAWL_API_KEY;
-const OPENROUTER_MODEL = runtimeEnv.OPENROUTER_MODEL;
-const OPENROUTER_TEMPERATURE = runtimeEnv.OPENROUTER_TEMPERATURE;
-const OPENROUTER_MAX_TOKENS = runtimeEnv.OPENROUTER_MAX_TOKENS;
-const APP_URL = runtimeEnv.APP_URL;
-const APP_NAME = runtimeEnv.APP_NAME;
+const OPENROUTER_API_KEY = env.OPENROUTER_API_KEY;
+const FIRECRAWL_API_KEY = env.FIRECRAWL_API_KEY;
+const OPENROUTER_MODEL = env.OPENROUTER_MODEL;
+const OPENROUTER_TEMPERATURE = env.OPENROUTER_TEMPERATURE;
+const OPENROUTER_MAX_TOKENS = env.OPENROUTER_MAX_TOKENS;
+const APP_URL = env.APP_URL;
+const APP_NAME = env.APP_NAME;
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 
 // Validate critical configuration
-if (!OPENROUTER_API_KEY || OPENROUTER_API_KEY.trim() === '') {
+if (!env.IS_BUILD_TIME && (!OPENROUTER_API_KEY || OPENROUTER_API_KEY.trim() === '')) {
   console.error('⚠️ ERROR: OpenRouter API key is not set in environment variables.');
   console.error('Please set NEXT_SERVER_OPENROUTER_API_KEY in your .env.local file in the project root.');
   // In development, we'll show a warning but allow the app to start
   // In production, this would be a critical error
-  if (runtimeEnv.NODE_ENV === 'production') {
+  if (env.IS_PROD) {
     throw new Error('OpenRouter API key is not set');
   }
 }
@@ -32,8 +29,8 @@ const FIRECRAWL_BASE_URL = process.env.FIRECRAWL_BASE_URL || 'https://api.firecr
 const FIRECRAWL_REQUEST_TIMEOUT = parseInt(process.env.FIRECRAWL_REQUEST_TIMEOUT || '60000'); // 60 seconds
 
 // Log configuration for debugging (only in development)
-if (runtimeEnv.NODE_ENV === 'development') {
-  console.log('API Client Configuration (loaded at', new Date(runtimeEnv._lastLoaded).toISOString(), '):');
+if (env.IS_DEV) {
+  console.log('API Client Configuration:');
   console.log('- OpenRouter API Key:', OPENROUTER_API_KEY ? `[Set] (first 5 chars: ${OPENROUTER_API_KEY.substring(0, 5)}...)` : '[Not set]');
   console.log('- Firecrawl API Key:', FIRECRAWL_API_KEY ? '[set]' : '[Not set]');
   console.log('- OpenRouter Model:', OPENROUTER_MODEL);
@@ -43,32 +40,14 @@ if (runtimeEnv.NODE_ENV === 'development') {
 
 // Create a custom OpenRouter client class
 class CustomOpenRouterClient {
-  private lastKeyRefresh: number;
   private apiKey: string;
   
   constructor() {
-    this.lastKeyRefresh = Date.now();
     this.apiKey = OPENROUTER_API_KEY;
-  }
-  
-  // Function to refresh API keys if needed
-  private refreshApiKey() {
-    // Check if it's been more than 5 minutes since last refresh
-    const now = Date.now();
-    if (now - this.lastKeyRefresh > 5 * 60 * 1000) {
-      const freshEnv = refreshEnv();
-      this.apiKey = freshEnv.OPENROUTER_API_KEY;
-      this.lastKeyRefresh = now;
-      console.log('API key refreshed at', new Date(now).toISOString());
-    }
-    return this.apiKey;
   }
 
   async chat(messages: Array<{ role: string; content: string }>, options: { model?: string } = {}) {
     try {
-      // Always use the latest API key
-      const currentApiKey = this.refreshApiKey();
-      
       // Get the model from options or environment 
       let model = options.model || OPENROUTER_MODEL;
       
@@ -82,7 +61,7 @@ class CustomOpenRouterClient {
           allow_fallbacks: false
         };
         // Only log this in development mode
-        if (process.env.NODE_ENV === 'development') {
+        if (env.IS_DEV) {
           console.log(`Routing DeepSeek model to Groq provider`);
         }
       }
@@ -99,7 +78,7 @@ class CustomOpenRouterClient {
             
             // Get the model config for additional info (only needed for specific debug scenarios)
             const modelConfig = modelRegistry.getModelConfig(model);
-            if (modelConfig && modelConfig.provider && process.env.NODE_ENV === 'development') {
+            if (modelConfig && modelConfig.provider && env.IS_DEV) {
               console.log(`Using: ${modelConfig.name} (${modelConfig.provider})`);
             }
           }
@@ -110,18 +89,18 @@ class CustomOpenRouterClient {
       }
       
       // Only log in development mode
-      if (process.env.NODE_ENV === 'development') {
+      if (env.IS_DEV) {
         console.log('Calling OpenRouter with model:', model);
       }
       
       // Verify API key is available before making the request
-      if (!currentApiKey) {
+      if (!this.apiKey) {
         console.error('ERROR: No OpenRouter API key found. Please set NEXT_SERVER_OPENROUTER_API_KEY in your environment variables.');
         throw new Error('OpenRouter API key is missing');
       }
       
       // Log key status only in development mode
-      if (process.env.NODE_ENV === 'development') {
+      if (env.IS_DEV) {
         console.log('OpenRouter API Key status:', 'API key is set');
       }
       
@@ -130,7 +109,7 @@ class CustomOpenRouterClient {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentApiKey}`,
+          'Authorization': `Bearer ${this.apiKey}`,
           'HTTP-Referer': 'https://advanced-deep-research.vercel.app/',
           'X-Title': 'Advanced Deep Research',
         },
@@ -147,14 +126,8 @@ class CustomOpenRouterClient {
         const errorData = await response.text();
         console.error('OpenRouter API error: Authentication failed');
         
-        // Try to refresh the API key
-        console.log('Authentication failed. Trying to refresh API key...');
-        
-        // If refreshing also fails, provide a clear error
-        console.error(`OpenRouter authentication failed. Please check your API key.`);
-        
         // Include just enough debugging information to diagnose the issue
-        if (process.env.NODE_ENV === 'development') {
+        if (env.IS_DEV) {
           console.log(`API key length: ${this.apiKey?.length || 0}`);
           console.log(`API key first 5 chars: ${this.apiKey?.substring(0, 5) || 'N/A'}`);
         }
@@ -200,9 +173,6 @@ class CustomOpenRouterClient {
    */
   async *streamChat(messages: Array<{ role: string; content: string }>, options: { model?: string } = {}): AsyncGenerator<string> {
     try {
-      // Always use the latest API key
-      const currentApiKey = this.refreshApiKey();
-      
       // Get the model from options or environment 
       let model = options.model || OPENROUTER_MODEL;
       
@@ -216,7 +186,7 @@ class CustomOpenRouterClient {
           allow_fallbacks: false
         };
         // Only log this in development mode
-        if (process.env.NODE_ENV === 'development') {
+        if (env.IS_DEV) {
           console.log(`Routing DeepSeek model to Groq provider for streaming`);
         }
       }
@@ -237,7 +207,7 @@ class CustomOpenRouterClient {
       }
       
       // Verify API key is available before making the request
-      if (!currentApiKey) {
+      if (!this.apiKey) {
         console.error('ERROR: No OpenRouter API key found for streaming');
         throw new Error('OpenRouter API key is missing');
       }
@@ -247,7 +217,7 @@ class CustomOpenRouterClient {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentApiKey}`,
+          'Authorization': `Bearer ${this.apiKey}`,
           'HTTP-Referer': 'https://advanced-deep-research.vercel.app/',
           'X-Title': 'Advanced Deep Research',
         },

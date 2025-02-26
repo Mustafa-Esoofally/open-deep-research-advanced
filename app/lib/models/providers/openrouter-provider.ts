@@ -1,5 +1,5 @@
 import { BaseModelProvider, ChatMessage, ModelProviderOptions, ModelResponse, StreamChunkCallback } from './base-provider';
-import { env, refreshEnv } from '../../env';
+import { env } from '../../env';
 
 // Extended options for OpenRouter
 export interface OpenRouterOptions extends ModelProviderOptions {
@@ -17,7 +17,6 @@ export interface OpenRouterOptions extends ModelProviderOptions {
 }
 
 export class OpenRouterProvider extends BaseModelProvider {
-  private lastKeyRefresh: number;
   private apiKey: string;
   private baseUrl: string;
   private appName: string;
@@ -26,7 +25,6 @@ export class OpenRouterProvider extends BaseModelProvider {
   
   constructor(options: OpenRouterOptions) {
     super(options);
-    this.lastKeyRefresh = Date.now();
     
     // Get environment variables or use defaults
     this.apiKey = options.apiKey || env.OPENROUTER_API_KEY;
@@ -35,28 +33,14 @@ export class OpenRouterProvider extends BaseModelProvider {
     this.appUrl = options.appUrl || env.APP_URL || 'https://example.com';
     this.providerRouting = options.providerRouting;
     
-    if (!this.apiKey) {
+    if (!env.IS_BUILD_TIME && !this.apiKey) {
       console.warn('WARNING: OpenRouter API key not found. Set NEXT_SERVER_OPENROUTER_API_KEY in your .env.local file.');
     }
   }
   
-  private refreshApiKey() {
-    // Check if it's been more than 5 minutes since last refresh
-    const now = Date.now();
-    if (now - this.lastKeyRefresh > 5 * 60 * 1000) {
-      const freshEnv = refreshEnv();
-      this.apiKey = freshEnv.OPENROUTER_API_KEY;
-      this.lastKeyRefresh = now;
-    }
-    return this.apiKey;
-  }
-  
   async chat(messages: ChatMessage[]): Promise<ModelResponse> {
     try {
-      // Always use the latest API key
-      const currentApiKey = this.refreshApiKey();
-      
-      if (!currentApiKey || currentApiKey.trim() === '') {
+      if (!this.apiKey || this.apiKey.trim() === '') {
         console.error('ERROR: No OpenRouter API key found.');
         throw new Error('OpenRouter API key is not set');
       }
@@ -70,7 +54,7 @@ export class OpenRouterProvider extends BaseModelProvider {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${currentApiKey}`,
+            'Authorization': `Bearer ${this.apiKey}`,
             'HTTP-Referer': this.appUrl,
             'X-Title': this.appName
           },
@@ -93,14 +77,6 @@ export class OpenRouterProvider extends BaseModelProvider {
         if (!response.ok) {
           const errorText = await response.text();
           console.error('OpenRouter API error:', response.status, errorText);
-          
-          // Handle special case: if authentication fails, try refreshing the API key
-          if (response.status === 401) {
-            console.log('Authentication failed. Forcing refresh of API key...');
-            const freshEnv = refreshEnv();
-            this.apiKey = freshEnv.OPENROUTER_API_KEY;
-          }
-          
           throw new Error(`OpenRouter API error: ${response.status} ${errorText}`);
         }
   
@@ -139,10 +115,7 @@ export class OpenRouterProvider extends BaseModelProvider {
 
   async streamChat(messages: ChatMessage[], callback: StreamChunkCallback): Promise<ModelResponse> {
     try {
-      // Always use the latest API key
-      const currentApiKey = this.refreshApiKey();
-      
-      if (!currentApiKey || currentApiKey.trim() === '') {
+      if (!this.apiKey || this.apiKey.trim() === '') {
         console.error('ERROR: No OpenRouter API key found.');
         throw new Error('OpenRouter API key is not set');
       }
@@ -156,7 +129,7 @@ export class OpenRouterProvider extends BaseModelProvider {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${currentApiKey}`,
+            'Authorization': `Bearer ${this.apiKey}`,
             'HTTP-Referer': this.appUrl,
             'X-Title': this.appName
           },
@@ -180,14 +153,6 @@ export class OpenRouterProvider extends BaseModelProvider {
         if (!response.ok) {
           const errorText = await response.text();
           console.error('OpenRouter API streaming error:', response.status, errorText);
-          
-          // Handle special case: if authentication fails, try refreshing the API key
-          if (response.status === 401) {
-            console.log('Authentication failed. Forcing refresh of API key...');
-            const freshEnv = refreshEnv();
-            this.apiKey = freshEnv.OPENROUTER_API_KEY;
-          }
-          
           throw new Error(`OpenRouter API error: ${response.status} ${errorText}`);
         }
 

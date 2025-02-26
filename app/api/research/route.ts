@@ -1,11 +1,11 @@
 import { NextRequest } from 'next/server';
 import { UnifiedResearchAgent } from '@/app/lib/models/unified-research-agent';
-import { refreshEnv } from '@/app/lib/env';
+import { env } from '@/app/lib/env';
 import { modelRegistry } from '@/app/lib/models/providers';
 
 // Add a simple logger utility for API routes
 const apiLogger = (message: string, data?: any) => {
-  if (process.env.NODE_ENV === 'development') {
+  if (env.IS_DEV) {
     const timestamp = new Date().toISOString().substring(11, 19);
     if (data) {
       console.log(`[${timestamp}] 🔌 [API] ${message}`, data);
@@ -15,10 +15,27 @@ const apiLogger = (message: string, data?: any) => {
   }
 };
 
-// Force environment refresh at the start of each API call
-refreshEnv();
-
 export async function POST(req: NextRequest) {
+  // Always return a mock response during build time or if missing environment variables
+  if (env.IS_BUILD_TIME || env.IS_BROWSER || !env.IS_VALID()) {
+    // If we're in browser or missing env vars, return a friendly message
+    const reason = env.IS_BROWSER ? 'client-side' : (env.IS_BUILD_TIME ? 'build-time' : 'missing environment variables');
+    
+    console.log(`⚠️ Research API called during ${reason} - returning friendly error message`);
+    return new Response(
+      JSON.stringify({
+        type: 'error',
+        content: `API cannot be used directly from ${reason}. Please ensure server environment variables are properly configured.`,
+      }),
+      {
+        status: 200,  // Use 200 to prevent error pages
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+  }
+
   const start = Date.now();
   apiLogger('Research API route called');
   
@@ -38,7 +55,7 @@ export async function POST(req: NextRequest) {
     let validatedModelKey = modelKey;
     if (!modelKey || !modelRegistry.getModelConfig(modelKey)) {
       // Use default model if invalid
-      validatedModelKey = process.env.DEFAULT_MODEL_KEY || 'deepseek-r1';
+      validatedModelKey = env.DEFAULT_MODEL_KEY;
       apiLogger(`Invalid model key: ${modelKey}, using default: ${validatedModelKey}`);
     }
 
