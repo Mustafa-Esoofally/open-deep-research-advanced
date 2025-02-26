@@ -17,12 +17,14 @@ import { ThemeToggle } from '@/app/components/ui/theme-toggle';
 import { ModelSelector } from '@/app/components/ui/model-selector';
 import { Popover, PopoverContent, PopoverTrigger } from "@/app/components/ui/popover";
 import { useModelSelection } from '@/app/hooks/useModelSelection';
-import { Loader2, Expand, List, Search, ChevronDown, User, Clock, ExternalLink, Maximize2, X, ChevronRight, RefreshCw, History, ArrowRight } from 'lucide-react';
+import { Loader2, Expand, List, Search, ChevronDown, User, Clock, ExternalLink, Maximize2, X, ChevronRight, RefreshCw, History, ArrowRight, Activity, Globe } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/app/components/ui/tabs';
 
 // Import custom components and utilities
 import { MessageItem } from './MessageItem';
 import { SidePanel } from './SidePanel';
 import { SourcesPanel } from './SourcesPanel';
+import { ActivityPanel } from './ActivityPanel';
 import { ReasoningTraces } from './ReasoningTraces';
 import { processStreamData } from './StreamProcessor';
 import { Message, ResearchState, initialResearchState } from './types';
@@ -39,75 +41,51 @@ export function Research({ initialQuery = '', researchMode = 'deep-research', mo
   const [input, setInput] = useState(initialQuery);
   const [state, setState] = useState<ResearchState>(() => {
     // Initialize state based on research mode
-    if (researchMode === 'deep-research') {
-      return {
-        ...initialResearchState,
-        isDeepResearch: true,
-        depth: 2,
-        breadth: 3,
-        sources: [
-          {
-            title: 'How to display sources on the right side of chat in web applications',
-            url: 'https://example.com/web-chat-design',
-            domain: 'example.com',
-            relevance: 0.95,
-            snippet: 'Best practices for designing chat interfaces include placing sources on the right side for easy reference.'
-          },
-          {
-            title: 'UI/UX Design Patterns for Chat Applications',
-            url: 'https://uidesign.example.org/chat-patterns',
-            domain: 'uidesign.example.org',
-            relevance: 0.87,
-            snippet: 'Modern chat interfaces often place supplementary information on the right side panel.'
-          },
-          {
-            title: 'Research on Source Citation in AI Assistants',
-            url: 'https://ai-research.example.net/citations',
-            domain: 'ai-research.example.net',
-            relevance: 0.92,
-            snippet: 'Studies show users prefer seeing sources prominently displayed with counts of references.'
-          },
-          {
-            title: 'The Psychology of Information Sources in Chat Interfaces',
-            url: 'https://psychology.example.edu/chat-ux',
-            domain: 'psychology.example.edu',
-            relevance: 0.78,
-            snippet: 'User trust increases when sources are clearly presented alongside chat conversations.'
-          },
-          {
-            title: 'Implementing Source Panels in React Applications',
-            url: 'https://react-dev.example.io/source-panels',
-            domain: 'react-dev.example.io',
-            relevance: 0.89,
-            snippet: 'Tutorial on creating source panels for chat applications using React components.'
-          }
-        ]
-      };
-    } else if (researchMode === 'pro-search') {
-      return {
-        ...initialResearchState,
-        isDeepResearch: true,
-        depth: 1,
-        breadth: 3,
-        sources: [
-          {
-            title: 'Professional Search Interface Design',
-            url: 'https://pro-search.example.com/design',
-            domain: 'pro-search.example.com',
-            relevance: 0.91,
-            snippet: 'Professional search interfaces require clear source attribution and counts.'
-          },
-          {
-            title: 'Advanced Search UI Components',
-            url: 'https://ui-components.example.org/search',
-            domain: 'ui-components.example.org',
-            relevance: 0.85,
-            snippet: 'Components for search interfaces including source panels and citation displays.'
-          }
-        ]
-      };
-    }
-    return initialResearchState;
+    const isDeepResearch = researchMode === 'deep-research';
+    
+    return {
+      ...initialResearchState,
+      isDeepResearch,
+      depth: isDeepResearch ? 2 : 1,
+      breadth: isDeepResearch ? 3 : 2,
+      sources: [
+        {
+          title: 'How to display sources on the right side of chat in web applications',
+          url: 'https://example.com/web-chat-design',
+          domain: 'example.com',
+          relevance: 0.95,
+          snippet: 'Best practices for designing chat interfaces include placing sources on the right side for easy reference.'
+        },
+        {
+          title: 'UI/UX Design Patterns for Chat Applications',
+          url: 'https://uidesign.example.org/chat-patterns',
+          domain: 'uidesign.example.org',
+          relevance: 0.87,
+          snippet: 'Modern chat interfaces often place supplementary information on the right side panel.'
+        },
+        {
+          title: 'Research on Source Citation in AI Assistants',
+          url: 'https://ai-research.example.net/citations',
+          domain: 'ai-research.example.net',
+          relevance: 0.92,
+          snippet: 'Studies show users prefer seeing sources prominently displayed with counts of references.'
+        },
+        {
+          title: 'The Psychology of Information Sources in Chat Interfaces',
+          url: 'https://psychology.example.edu/chat-ux',
+          domain: 'psychology.example.edu',
+          relevance: 0.78,
+          snippet: 'User trust increases when sources are clearly presented alongside chat conversations.'
+        },
+        {
+          title: 'Implementing Source Panels in React Applications',
+          url: 'https://react-dev.example.io/source-panels',
+          domain: 'react-dev.example.io',
+          relevance: 0.89,
+          snippet: 'Tutorial on creating source panels for chat applications using React components.'
+        }
+      ]
+    };
   });
   const [activeTab, setActiveTab] = useState<string>('sources');
   
@@ -301,6 +279,13 @@ export function Research({ initialQuery = '', researchMode = 'deep-research', mo
     setInput('');
     
     try {
+      // Update the model to Claude 3.7 Sonnet if not already set
+      const currentModelKey = modelKey || selectedModel || 'claude-3.7-sonnet';
+      
+      // Log the model being used
+      console.log(`Using model: ${currentModelKey}`);
+      console.log(`Deep research mode: ${state.isDeepResearch ? 'enabled' : 'disabled'}`);
+      
       const response = await fetch('/api/research', {
         method: 'POST',
         headers: {
@@ -310,10 +295,10 @@ export function Research({ initialQuery = '', researchMode = 'deep-research', mo
           query: messageToSend,
           options: {
             isDeepResearch: state.isDeepResearch,
-            depth: state.depth,
-            breadth: state.breadth
+            depth: state.isDeepResearch ? state.depth : 1,
+            breadth: state.isDeepResearch ? state.breadth : 2
           },
-          modelKey: modelKey || selectedModel,
+          modelKey: currentModelKey,
         }),
       });
       
@@ -331,6 +316,7 @@ export function Research({ initialQuery = '', researchMode = 'deep-research', mo
         if (done) break;
         
         const chunk = decoder.decode(value, { stream: true });
+        console.log('Received chunk:', chunk.substring(0, 100) + '...');
         processStreamData(chunk, state, setState);
       }
     } catch (error) {
@@ -353,91 +339,42 @@ export function Research({ initialQuery = '', researchMode = 'deep-research', mo
 
   // Render the model info badge
   const renderModelInfo = () => {
-    const displayName = selectedModel.includes('deepseek') ? 'DeepSeek R1 Distill 70B' : selectedModel;
+    if (modelKey === 'claude-3.7-sonnet' || selectedModel === 'claude-3.7-sonnet') {
+      return (
+        <div className="hidden md:flex items-center gap-1 text-xs text-slate-400 bg-slate-800/30 px-2 py-0.5 rounded">
+          <span>Claude 3.7 Sonnet: Fast, powerful model with 200K context window</span>
+        </div>
+      );
+    }
+    
+    if (selectedModel?.includes('deepseek')) {
+      return (
+        <div className="hidden md:flex items-center gap-1 text-xs text-slate-400 bg-slate-800/30 px-2 py-0.5 rounded">
+          <span>Fast Llama-3.3-70B-Instruct distilled with DeepSeek R1 - powered by Groq for exceptional speed.</span>
+        </div>
+      );
+    }
     
     return (
       <div className="hidden md:flex items-center gap-1 text-xs text-slate-400 bg-slate-800/30 px-2 py-0.5 rounded">
-        <span>Fast Llama-3.3-70B-Instruct distilled with DeepSeek R1 - powered by Groq for exceptional speed.</span>
+        <span>{selectedModel || modelKey || 'Default model'}</span>
       </div>
     );
   };
 
-  // Render function for the main UI
+  // Render the main UI
   return (
     <div className="flex flex-col h-full bg-background text-foreground">
-      {/* Header */}
+      {/* Simplified Header */}
       <header className="border-b border-border py-2 px-4 flex items-center justify-between">
-        <div className="flex items-center">
-          <span className="font-semibold text-lg">Grok 3</span>
-          <span className="ml-2 text-sm bg-blue-600 text-white px-2 py-0.5 rounded">beta</span>
-          <ChevronDown className="h-4 w-4 ml-1 text-muted-foreground" />
-        </div>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" className="gap-2">
-            <History className="h-4 w-4" />
-            <span>History</span>
-          </Button>
-          {/* Hello button */}
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            className="bg-secondary hover:bg-secondary/80 rounded-full h-9 px-4"
-          >
-            hello
-          </Button>
-          {/* Header controls */}
           <ThemeToggle />
+          {renderModelInfo()}
         </div>
       </header>
 
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left sidebar - only show when there are search results or messages */}
-        {(searchResults.length > 0 || state.messages.length > 0) && showSidebar && (
-          <div className="w-60 min-w-60 border-r border-border bg-card flex flex-col">
-            <div className="p-4 border-b border-border bg-card">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="h-5 w-5 flex items-center justify-center">
-                  <span className="text-xl font-medium">·</span>
-                </div>
-                <div className="font-semibold">DeepSearch</div>
-              </div>
-              <div className="text-xs text-muted-foreground flex items-center gap-2">
-                <span>14s</span>
-                <span>•</span>
-                <span>30 sources</span>
-              </div>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto">
-              <div className="p-3 space-y-3">
-                <div className="flex items-center gap-2 text-sm py-1 rounded text-muted-foreground">
-                  <RefreshCw className="h-4 w-4 text-muted-foreground" />
-                  <span>Assessing the greeting</span>
-                </div>
-              </div>
-            </div>
-            
-            {/* Web pages indicator */}
-            <div className="p-3 border-t border-border">
-              <div className="flex items-center justify-center">
-                <div className="flex -space-x-1.5">
-                  {Array.from({ length: 7 }).map((_, i) => (
-                    <div 
-                      key={i} 
-                      className="w-5 h-5 rounded-full border border-border" 
-                      style={{ 
-                        backgroundColor: ['#3B82F6', '#EC4899', '#10B981', '#F59E0B', '#6366F1', '#ef4444', '#8B5CF6'][i % 7]
-                      }} 
-                    />
-                  ))}
-                </div>
-                <span className="ml-2 text-sm text-muted-foreground">30 web pages</span>
-              </div>
-            </div>
-          </div>
-        )}
-        
         {/* Main content area */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Messages container */}
@@ -447,9 +384,39 @@ export function Research({ initialQuery = '', researchMode = 'deep-research', mo
           >
             {state.messages.length === 0 && searchResults.length === 0 ? (
               <div className="h-full flex items-center justify-center">
-                <div className="text-center">
-                  <h1 className="text-3xl font-bold mb-4">Ask anything</h1>
-                  <p className="text-muted-foreground">Grok 3 is here to help with your questions</p>
+                <div className="text-center max-w-xl">
+                  <h1 className="text-3xl font-bold mb-4">Advanced Research Assistant</h1>
+                  <p className="text-muted-foreground mb-8">
+                    Ask any question and get thoroughly researched answers with web sources. Enable Deep Research for more comprehensive results.
+                  </p>
+                  
+                  <div className="bg-card border border-border rounded-lg p-6">
+                    <div className="flex flex-col gap-4">
+                      <div className="flex items-center">
+                        <Search className="h-5 w-5 mr-3 text-muted-foreground" />
+                        <div className="text-left">
+                          <p className="font-medium">Web Research</p>
+                          <p className="text-sm text-muted-foreground">Searches across the web to find relevant information</p>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center">
+                        <Activity className="h-5 w-5 mr-3 text-muted-foreground" />
+                        <div className="text-left">
+                          <p className="font-medium">Reasoning Traces</p>
+                          <p className="text-sm text-muted-foreground">Shows the AI's reasoning process in the main content area</p>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center">
+                        <Globe className="h-5 w-5 mr-3 text-muted-foreground" />
+                        <div className="text-left">
+                          <p className="font-medium">Source Citations</p>
+                          <p className="text-sm text-muted-foreground">Provides credible sources for all information</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -464,6 +431,21 @@ export function Research({ initialQuery = '', researchMode = 'deep-research', mo
                   />
                 ))}
                 
+                {/* Display reasoning traces in the main content area */}
+                {state.traces.length > 0 && (
+                  <ReasoningTraces traces={state.traces} />
+                )}
+                
+                {/* Show progress indicator */}
+                {state.isLoading && (
+                  <div className="flex items-center space-x-4 my-4">
+                    <div className="w-full">
+                      <Progress value={state.progress} className="h-2" />
+                      <p className="text-xs text-muted-foreground mt-1">{state.status}</p>
+                    </div>
+                  </div>
+                )}
+                
                 {/* DeepSearch results */}
                 {searchResults.length > 0 && (
                   <div className="bg-card rounded-lg overflow-hidden border border-border">
@@ -472,14 +454,6 @@ export function Research({ initialQuery = '', researchMode = 'deep-research', mo
                         <div className="flex items-center gap-2">
                           <Search className="h-4 w-4 text-muted-foreground" />
                           <span>Searching for "{searchQuery}"</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Button variant="ghost" size="icon" className="h-7 w-7 rounded text-muted-foreground hover:text-foreground hover:bg-secondary">
-                            <Maximize2 className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-7 w-7 rounded text-muted-foreground hover:text-foreground hover:bg-secondary">
-                            <List className="h-4 w-4" />
-                          </Button>
                         </div>
                       </div>
                       
@@ -500,20 +474,6 @@ export function Research({ initialQuery = '', researchMode = 'deep-research', mo
                             </div>
                           ))}
                         </div>
-                        
-                        <button className="mt-4 text-sm text-muted-foreground hover:text-foreground">See 5 more</button>
-                      </div>
-                      
-                      <div className="mt-4 border-t border-border pt-4 text-sm">
-                        <p className="flex gap-2 items-start">
-                          <span className="text-lg leading-none mt-1.5">•</span>
-                          <span>From this search, there are various news articles from {searchQuery}, covering different topics like legal cases, political events, and social issues.</span>
-                        </p>
-                      </div>
-                      
-                      <div className="mt-6 flex items-center gap-2 text-sm">
-                        <RefreshCw className="h-4 w-4 text-muted-foreground" />
-                        <span>Searching for "what is special about {searchQuery}"</span>
                       </div>
                     </div>
                   </div>
@@ -556,30 +516,137 @@ export function Research({ initialQuery = '', researchMode = 'deep-research', mo
                 </Button>
               </div>
             </div>
-            <div className="max-w-3xl mx-auto mt-2 flex justify-start space-x-2">
-              <Button 
-                size="sm" 
-                variant="outline" 
-                className="flex items-center gap-1 bg-transparent border-border hover:bg-secondary/60"
-              >
-                <Search className="h-3 w-3" />
-                <span>DeepSearch</span>
-              </Button>
-              <Button 
-                size="sm" 
-                variant="outline" 
-                className="bg-transparent border-border hover:bg-secondary/60"
-              >
-                <span>Think</span>
-              </Button>
+            
+            {/* Controls below the search box */}
+            <div className="max-w-3xl mx-auto mt-2 flex justify-between items-center">
+              <div className="flex items-center space-x-2">
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  className="flex items-center gap-1 bg-transparent border-border hover:bg-secondary/60"
+                >
+                  <Search className="h-3 w-3" />
+                  <span>DeepSearch</span>
+                </Button>
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  className="bg-transparent border-border hover:bg-secondary/60"
+                >
+                  <span>Think</span>
+                </Button>
+                
+                {/* Deep Research Toggle */}
+                <div className="flex items-center space-x-2 ml-2 px-2 py-1 border border-border rounded-md bg-background">
+                  <Label 
+                    htmlFor="deep-research" 
+                    className="text-xs cursor-pointer"
+                  >
+                    Deep Research
+                  </Label>
+                  <Switch
+                    id="deep-research"
+                    checked={state.isDeepResearch}
+                    onCheckedChange={(checked) => {
+                      setState(prev => ({
+                        ...prev,
+                        isDeepResearch: checked,
+                        depth: checked ? 2 : 1,
+                        breadth: checked ? 3 : 2
+                      }));
+                    }}
+                    className="scale-75 origin-right"
+                  />
+                </div>
+              </div>
+              
+              {/* Model Selector Dropdown */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="gap-1 bg-transparent border-border hover:bg-secondary/60"
+                  >
+                    <span className="text-xs truncate max-w-28">
+                      {selectedModel === 'claude-3.7-sonnet' ? 'Claude 3.7 Sonnet' :
+                       selectedModel === 'deepseek-r1' ? 'DeepSeek R1' :
+                       selectedModel === 'gpt-4o' ? 'GPT-4o' :
+                       selectedModel || 'Select Model'}
+                    </span>
+                    <ChevronDown className="h-3 w-3" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-52 p-0" align="end">
+                  <div className="p-2">
+                    <div className="space-y-1">
+                      <button
+                        className={`w-full text-left px-2 py-1.5 text-sm rounded-md ${selectedModel === 'claude-3.7-sonnet' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
+                        onClick={() => updateModel('claude-3.7-sonnet')}
+                      >
+                        Claude 3.7 Sonnet
+                      </button>
+                      <button
+                        className={`w-full text-left px-2 py-1.5 text-sm rounded-md ${selectedModel === 'deepseek-r1' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
+                        onClick={() => updateModel('deepseek-r1')}
+                      >
+                        DeepSeek R1
+                      </button>
+                      <button
+                        className={`w-full text-left px-2 py-1.5 text-sm rounded-md ${selectedModel === 'gpt-4o' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
+                        onClick={() => updateModel('gpt-4o')}
+                      >
+                        GPT-4o
+                      </button>
+                      <button
+                        className={`w-full text-left px-2 py-1.5 text-sm rounded-md ${selectedModel === 'claude-3-sonnet' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
+                        onClick={() => updateModel('claude-3-sonnet')}
+                      >
+                        Claude 3 Sonnet
+                      </button>
+                      <button
+                        className={`w-full text-left px-2 py-1.5 text-sm rounded-md ${selectedModel === 'llama-3-70b-instruct' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
+                        onClick={() => updateModel('llama-3-70b-instruct')}
+                      >
+                        Llama-3-70B-Instruct
+                      </button>
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
         </div>
         
-        {/* Right side sources panel */}
-        {state.sources.length > 0 && (
-          <SourcesPanel sources={state.sources} />
-        )}
+        {/* Right side panel with tabs for sources and activities */}
+        <div className="w-80 min-w-80 h-full border-l border-border">
+          <Tabs defaultValue="sources" className="h-full flex flex-col">
+            <TabsList className="w-full flex border-b border-border rounded-none">
+              <TabsTrigger 
+                value="sources" 
+                onClick={() => setActiveTab('sources')}
+                className="flex-1 data-[state=active]:border-b-2 data-[state=active]:border-primary"
+              >
+                Sources ({state.sources.length})
+              </TabsTrigger>
+              <TabsTrigger 
+                value="activities" 
+                onClick={() => setActiveTab('activities')}
+                className="flex-1 data-[state=active]:border-b-2 data-[state=active]:border-primary"
+              >
+                Activity
+              </TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="sources" className="flex-1 overflow-hidden p-0 m-0">
+              <SourcesPanel sources={state.sources} />
+            </TabsContent>
+            
+            <TabsContent value="activities" className="flex-1 overflow-hidden p-0 m-0">
+              <ActivityPanel activities={state.activities} isLoading={state.isLoading} />
+            </TabsContent>
+          </Tabs>
+        </div>
       </div>
     </div>
   );

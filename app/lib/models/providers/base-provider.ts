@@ -6,31 +6,32 @@ export interface ModelProviderOptions {
   maxTokens?: number;
   modelId: string;
   headers?: Record<string, string>;
+  topP?: number;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
+  [key: string]: any;
 }
 
 export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string | Array<any>; // Support for multimodal content
+  role: 'user' | 'system' | 'assistant';
+  content: string;
 }
 
 export interface ModelResponse {
   content: string;
-  usage?: {
-    promptTokens?: number;
-    completionTokens?: number;
-    totalTokens?: number;
-  };
   metadata?: {
     model?: string;
     usage?: {
-      prompt_tokens: number;
-      completion_tokens: number;
-      total_tokens: number;
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
     };
     raw?: any;
   };
-  raw?: any; // Raw response for debugging
 }
+
+// Callback for streaming responses
+export type StreamChunkCallback = (chunk: string) => string | void;
 
 // Base provider abstract class
 export abstract class BaseModelProvider {
@@ -39,13 +40,33 @@ export abstract class BaseModelProvider {
   constructor(options: ModelProviderOptions) {
     this.options = {
       temperature: 0.7,
-      maxTokens: 4000,
+      maxTokens: 1000,
+      topP: 1.0,
+      frequencyPenalty: 0,
+      presencePenalty: 0,
       ...options,
     };
   }
 
   // Main method to be implemented by all providers
   abstract chat(messages: ChatMessage[]): Promise<ModelResponse>;
+
+  // Streaming chat completion (to be implemented by subclasses)
+  async streamChat(
+    messages: ChatMessage[],
+    callback: StreamChunkCallback
+  ): Promise<ModelResponse> {
+    // Default implementation that falls back to regular chat
+    console.warn('streamChat not implemented in this provider, falling back to regular chat');
+    const response = await this.chat(messages);
+    
+    // Process the entire response as one chunk through the callback
+    if (callback) {
+      callback(response.content);
+    }
+    
+    return response;
+  }
 
   // Helper for wrapping in LangChain compatible format
   createLangChainAdapter() {

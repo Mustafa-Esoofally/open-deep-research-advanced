@@ -517,44 +517,193 @@ ${content}
    * Stream a progress update to the client
    */
   private streamProgress(progress: ResearchProgress): string {
-    logger.info('Progress update', {
-      progress: progress.progress || 0,
-      status: progress.status
-    });
-    
-    if (progress.currentQuery) {
-      logger.info(`Current query: "${progress.currentQuery.substring(0, 50)}${progress.currentQuery.length > 50 ? '...' : ''}"`);
-    }
-    
-    // Create a standardized progress message for streaming
-    const progressData = {
-      type: 'progress',
-      progress: progress.progress || 0,
-      status: progress.status || 'Researching...'
-    };
-    
-    // Add details for deep research if available
-    if (progress.currentDepth !== undefined && progress.totalDepth !== undefined) {
-      Object.assign(progressData, {
-        details: {
-          depth: {
-            current: progress.currentDepth,
-            total: progress.totalDepth
-          },
-          breadth: {
-            current: progress.currentBreadth || 0,
-            total: progress.totalBreadth || 0
-          },
-          queries: {
-            current: progress.completedQueries || 0,
-            total: progress.totalQueries,
-            currentQuery: progress.currentQuery
-          }
-        }
+    try {
+      const progressData = JSON.stringify({
+        type: 'progress',
+        ...progress,
       });
+      
+      logger.info('Streaming progress update', progress);
+      return progressData;
+    } catch (error) {
+      logger.error('Error streaming progress', error);
+      return '';
     }
-    
-    return JSON.stringify(progressData) + '\n';
+  }
+
+  /**
+   * Stream sources update to the client
+   */
+  private streamSources(sources: Source[]): string {
+    try {
+      const sourcesData = JSON.stringify({
+        type: 'sources',
+        sources,
+      });
+      
+      logger.info(`Streaming ${sources.length} sources to client`);
+      return sourcesData;
+    } catch (error) {
+      logger.error('Error streaming sources', error);
+      return '';
+    }
+  }
+
+  /**
+   * Get a display name for the current model
+   */
+  private getModelDisplayName(): string {
+    const modelKey = this.modelKey;
+    if (modelKey === 'claude-3.7-sonnet') return 'Claude 3.7 Sonnet';
+    if (modelKey.includes('deepseek')) return 'DeepSeek R1 Distill';
+    return modelKey;
+  }
+
+  /**
+   * Stream responses from the model asynchronously
+   */
+  private async *streamProcessWithSelectedModel(query: string, rawResults: any[]): AsyncGenerator<string> {
+    try {
+      const formattedResults = this.formatSearchResults(rawResults);
+      
+      // Yield progress update
+      yield this.streamProgress({
+        progress: 70,
+        status: `Processing search results with ${this.getModelDisplayName()}...`
+      });
+      
+      // For Claude models, use more detailed prompt with fewer instructions
+      const isClaudeModel = this.modelKey === 'claude-3.7-sonnet';
+      
+      const systemPrompt = isClaudeModel 
+        ? `You are a helpful research assistant that provides accurate, insightful answers based on search results.
+Use clear formatting with appropriate headers, lists, and emphasis. Be accurate, comprehensive, and concise.
+Always cite your sources inline in the format [Source X], where X is the numerical index of the source.`
+        : DEFAULT_SYSTEM_PROMPT;
+        
+      const prompt = isClaudeModel
+        ? `Please analyze these search results and provide a comprehensive answer to the query: "${query}"
+        
+Search Results:
+${formattedResults}
+
+Provide your answer in a clear, well-structured format with:
+1. A direct answer to the question
+2. Supporting evidence and explanation
+3. Any relevant context or nuance
+4. References to sources using [Source X] format inline
+
+Remember to cite your sources by referencing the source number (e.g., [Source 1], [Source 3]).`
+        : `Based on the following search results, provide a comprehensive answer to the query: "${query}"
+        
+Search Results:
+${formattedResults}
+
+Ensure your answer is accurate, well-structured, and cites sources appropriately using [Source X] notation.`;
+      
+      // Log model and prompt info
+      logger.info(`Using model ${this.getModelDisplayName()} for research analysis`, {
+        modelKey: this.modelKey,
+        promptLength: prompt.length,
+        resultCount: rawResults.length
+      });
+      
+      // Get the appropriate model provider
+      const provider = modelRegistry.getProvider(this.modelKey, {
+        temperature: 0.7,
+        maxTokens: 4000
+      });
+      
+      // Stream progress update
+      yield this.streamProgress({
+        progress: 75,
+        status: `Analyzing information with ${this.getModelDisplayName()}...`
+      });
+      
+      // For Claude 3.7 Sonnet, use streaming chat completion
+      if (isClaudeModel) {
+        const messages = [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: prompt }
+        ];
+        
+        try {
+          // Start streaming response
+          let responseText = '';
+          let lastChunkTime = Date.now();
+          
+          // Notify that streaming has started
+          yield this.streamProgress({
+            progress: 80,
+            status: 'Beginning to stream response...'
+          });
+          
+          const response = await provider.streamChat(messages, (chunk) => {
+            const now = Date.now();
+            
+            // Send a content chunk to the client
+            const chunkData = JSON.stringify({
+              type: 'content_chunk',
+              content: chunk
+            });
+            
+            responseText += chunk;
+            lastChunkTime = now;
+            
+            return chunkData;
+          });
+          
+          // Complete streaming
+          yield JSON.stringify({
+            type: 'complete',
+            status: 'Response complete'
+          });
+          
+          return responseText;
+        } catch (error) {
+          logger.error('Error streaming chat completion', error);
+          
+          // Yield error information to the client
+          yield JSON.stringify({
+            type: 'error',
+            content: 'Error generating response. Please try again with a different query.'
+          });
+          
+          throw error;
+        }
+      } else {
+        // For non-streaming models, use standard chat completion
+        try {
+          const messages = [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: prompt }
+          ];
+          
+          const response = await provider.chat(messages);
+          
+          // Stream the final response as a single content message
+          yield JSON.stringify({
+            type: 'content',
+            content: response.content
+          });
+          
+          return response.content;
+        } catch (error) {
+          logger.error('Error in chat completion', error);
+          
+          // Yield error information to the client
+          yield JSON.stringify({
+            type: 'error',
+            content: 'Error generating response. Please try again with a different query.'
+          });
+          
+          throw error;
+        }
+      }
+    } catch (error) {
+      logger.error('Error in streamProcessWithSelectedModel', error);
+      throw error;
+    }
   }
 
   /**
@@ -662,174 +811,6 @@ ${content}
         type: 'error',
         content: 'Failed to generate research results. Please try again with a different query.'
       }) + '\n';
-    }
-  }
-  
-  /**
-   * Get a display name for the currently selected model
-   */
-  private getModelDisplayName(): string {
-    const modelConfig = modelRegistry.getModelConfig(this.modelKey);
-    return modelConfig ? modelConfig.name : this.modelKey;
-  }
-  
-  /**
-   * Process with the selected model instead of middleware
-   */
-  private async processWithSelectedModel(query: string, rawResults: any[]): Promise<string> {
-    try {
-      // Format the search results
-      const formattedResults = this.formatSearchResults(rawResults);
-      
-      // Create the prompt for the selected model
-      const modelConfig = modelRegistry.getModelConfig(this.modelKey);
-      const maxPrompLength = modelConfig?.contextLength || 4000;
-      const truncatedResults = this.trimPrompt(formattedResults, maxPrompLength);
-      
-      // Log token size info only in development mode
-      if (process.env.NODE_ENV === 'development') {
-        const approximateTokens = Math.ceil(truncatedResults.length / 4);
-        if (approximateTokens > 10000) {
-          console.log(`Approximate tokens for formatted results: ~${approximateTokens}`);
-        }
-      }
-      
-      // The prompt to analyze search results
-      const prompt = `
-You are a world-class research analyst tasked with generating a concise, insightful, and deeply researched report.
-
-RESEARCH QUERY: ${query}
-
-The following are search results collected from the web. Please analyze these results thoroughly and generate a comprehensive report that:
-
-1. Synthesizes information from multiple sources
-2. Provides well-reasoned analysis and insights 
-3. Cites specific sources when referring to data or claims
-4. Is organized with clear sections and a coherent structure
-5. Highlights contrasting viewpoints where they exist
-6. Provides actionable conclusions or recommendations
-7. Notes any limitations in the available information
-
-SEARCH RESULTS:
-${truncatedResults}
-
-Your response should be a complete, well-formatted report that could be presented to executives or academics. Use markdown formatting.
-      `;
-      
-      // Call the selected model with the prompt
-      const messages = [
-        { role: 'system', content: DEFAULT_SYSTEM_PROMPT },
-        { role: 'user', content: prompt }
-      ];
-      
-      try {
-        // Only log in development mode
-        if (process.env.NODE_ENV === 'development') {
-          console.log(`Processing with model: ${this.modelKey}`);
-        }
-        
-        // Use the existing chat method to call the model
-        const result = await openRouterClient.chat(messages, { model: this.modelKey });
-        
-        if (!result) {
-          throw new Error("Empty response from model");
-        }
-        
-        // Return the response content directly as the API now returns the content
-        return result;
-      } catch (error) {
-        // Log model-specific errors but don't expose full error details
-        console.error(`Error with model ${this.modelKey}:`, error instanceof Error ? error.message : 'Unknown error');
-        throw error; // Re-throw to be caught by the outer try/catch
-      }
-    } catch (error) {
-      console.error('Error processing with selected model:', error instanceof Error ? error.message : 'Unknown error');
-      return "An error occurred while processing search results with the selected model.";
-    }
-  }
-
-  /**
-   * Process with the selected model with streaming support
-   */
-  private async *streamProcessWithSelectedModel(query: string, rawResults: any[]): AsyncGenerator<string> {
-    try {
-      // Format the search results
-      const formattedResults = this.formatSearchResults(rawResults);
-      
-      // Create the prompt for the selected model
-      const modelConfig = modelRegistry.getModelConfig(this.modelKey);
-      const maxPrompLength = modelConfig?.contextLength || 4000;
-      const truncatedResults = this.trimPrompt(formattedResults, maxPrompLength);
-      
-      // The prompt to analyze search results
-      const prompt = `
-You are a world-class research analyst tasked with generating a concise, insightful, and deeply researched report.
-
-RESEARCH QUERY: ${query}
-
-The following are search results collected from the web. Please analyze these results thoroughly and generate a comprehensive report that:
-
-1. Synthesizes information from multiple sources
-2. Provides well-reasoned analysis and insights 
-3. Cites specific sources when referring to data or claims
-4. Is organized with clear sections and a coherent structure
-5. Highlights contrasting viewpoints where they exist
-6. Provides actionable conclusions or recommendations
-7. Notes any limitations in the available information
-
-SEARCH RESULTS:
-${truncatedResults}
-
-Your response should be a complete, well-formatted report that could be presented to executives or academics. Use markdown formatting.
-      `;
-      
-      // Call the selected model with the prompt
-      const messages = [
-        { role: 'system', content: DEFAULT_SYSTEM_PROMPT },
-        { role: 'user', content: prompt }
-      ];
-      
-      // Use streaming to process the response
-      yield JSON.stringify({
-        type: 'reasoning_trace',
-        content: `Starting to stream analysis from ${this.getModelDisplayName()}...`
-      }) + '\n';
-      
-      // Process stream from OpenRouter
-      let fullContent = '';
-      try {
-        // Use the streamChat method
-        for await (const chunk of openRouterClient.streamChat(messages, { model: this.modelKey })) {
-          if (chunk) {
-            fullContent += chunk;
-            
-            // Stream each chunk to the client
-            yield JSON.stringify({
-              type: 'content_chunk',
-              content: chunk
-            }) + '\n';
-          }
-        }
-        
-        // Return the complete content
-        return fullContent;
-      } catch (error) {
-        console.error(`Streaming error with model ${this.modelKey}:`, error instanceof Error ? error.message : 'Unknown error');
-        
-        // If we've received some content, return it even if streaming failed
-        if (fullContent) {
-          return fullContent;
-        }
-        
-        throw error; // Re-throw if we have no content
-      }
-    } catch (error) {
-      console.error('Error processing with selected model:', error instanceof Error ? error.message : 'Unknown error');
-      yield JSON.stringify({
-        type: 'error',
-        content: 'An error occurred while processing search results with the model.'
-      }) + '\n';
-      return "An error occurred while processing search results with the selected model.";
     }
   }
 

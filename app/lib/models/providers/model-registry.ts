@@ -16,6 +16,17 @@ export interface ModelConfig {
 
 // Available models with their configurations
 export const MODEL_CONFIGS: Record<string, ModelConfig> = {
+  'claude-3.7-sonnet': {
+    id: 'anthropic/claude-3.7-sonnet',
+    key: 'claude-3.7-sonnet',
+    name: 'Claude 3.7 Sonnet',
+    description: 'Fast model with 200K context window, excellent for reasoning.',
+    provider: 'anthropic',
+    contextLength: 200000,
+    capabilities: ['reasoning', 'analysis', 'streaming', 'research'],
+    defaultTemperature: 0.7,
+    defaultMaxTokens: 4000,
+  },
   'deepseek-r1': {
     id: 'deepseek/deepseek-r1:free',
     key: 'deepseek-r1',
@@ -31,7 +42,7 @@ export const MODEL_CONFIGS: Record<string, ModelConfig> = {
     id: 'deepseek/deepseek-r1-distill-llama-70b',
     key: 'deepseek-distill-70b',
     name: 'DeepSeek R1 Distill 70B',
-    description: 'Fast Llama-3.3-70B-Instruct distilled with DeepSeek R1 - powered by Groq for exceptional speed.',
+    description: 'Fast Llama-3 model distilled with DeepSeek R1.',
     provider: 'groq',
     contextLength: 131072,
     capabilities: ['reasoning', 'research', 'fast-inference'],
@@ -49,37 +60,15 @@ export const MODEL_CONFIGS: Record<string, ModelConfig> = {
     defaultTemperature: 0.7,
     defaultMaxTokens: 4000,
   },
-  'aion-1.0': {
-    id: 'aion-labs/aion-1.0',
-    key: 'aion-1.0',
-    name: 'Aion 1.0',
-    description: 'Multi-model system built on DeepSeek-R1 with augmented capabilities.',
-    provider: 'aion-labs',
-    contextLength: 32768,
-    capabilities: ['reasoning', 'coding'],
-    defaultTemperature: 0.7,
-    defaultMaxTokens: 4000,
-  },
   'gemini-flash': {
     id: 'google/gemini-2.0-flash-001',
     key: 'gemini-flash',
     name: 'Gemini Flash 2.0',
-    description: 'Fast Google model with massive 1M context window, perfect for processing large amounts of text.',
+    description: 'Google model with 1M context window, great for large texts.',
     provider: 'google',
     contextLength: 1000000, // 1M tokens
     capabilities: ['reasoning', 'processing', 'summarization'],
     defaultTemperature: 0.3, // Lower temperature for more focused processing
-    defaultMaxTokens: 4000,
-  },
-  'claude-3.7-sonnet': {
-    id: 'anthropic/claude-3.7-sonnet',
-    key: 'claude-3.7-sonnet',
-    name: 'Claude 3.7 Sonnet',
-    description: 'Fast, powerful model ideal for complex reasoning tasks.',
-    provider: 'anthropic',
-    contextLength: 200000,
-    capabilities: ['reasoning', 'analysis', 'creativity'],
-    defaultTemperature: 0.7,
     defaultMaxTokens: 4000,
   }
 };
@@ -119,6 +108,12 @@ export class ModelRegistry {
   
   // Get or create a provider for a specific model
   public getProvider(modelKey: string, options: any = {}): BaseModelProvider {
+    // Use claude-3.7-sonnet if modelKey is undefined or invalid
+    if (!modelKey || !MODEL_CONFIGS[modelKey]) {
+      console.log(`Using default model claude-3.7-sonnet instead of ${modelKey || 'undefined'}`);
+      modelKey = 'claude-3.7-sonnet';
+    }
+    
     // Check if we already have this provider instance
     const providerKey = `${modelKey}-${JSON.stringify(options)}`;
     

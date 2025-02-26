@@ -1,4 +1,4 @@
-import { BaseModelProvider, ChatMessage, ModelProviderOptions, ModelResponse } from './base-provider';
+import { BaseModelProvider, ChatMessage, ModelProviderOptions, ModelResponse, StreamChunkCallback } from './base-provider';
 import { env, refreshEnv } from '../../env';
 
 // Extended options for OpenRouter
@@ -132,6 +132,144 @@ export class OpenRouterProvider extends BaseModelProvider {
       console.error('Error in OpenRouter provider:', error);
       if (error instanceof Error && error.name === 'AbortError') {
         throw new Error('OpenRouter request timed out after 60 seconds');
+      }
+      throw error;
+    }
+  }
+
+  async streamChat(messages: ChatMessage[], callback: StreamChunkCallback): Promise<ModelResponse> {
+    try {
+      // Always use the latest API key
+      const currentApiKey = this.refreshApiKey();
+      
+      if (!currentApiKey || currentApiKey.trim() === '') {
+        console.error('ERROR: No OpenRouter API key found.');
+        throw new Error('OpenRouter API key is not set');
+      }
+      
+      // Add request timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minute timeout for streaming
+
+      try {
+        const response = await fetch(`${this.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${currentApiKey}`,
+            'HTTP-Referer': this.appUrl,
+            'X-Title': this.appName
+          },
+          body: JSON.stringify({
+            model: this.options.modelId,
+            messages: messages.map(m => ({
+              role: m.role,
+              content: m.content
+            })),
+            temperature: this.options.temperature || 0.7,
+            max_tokens: this.options.maxTokens || 4000,
+            stream: true, // Enable streaming
+            provider: this.providerRouting,
+            ...this.options
+          }),
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('OpenRouter API streaming error:', response.status, errorText);
+          
+          // Handle special case: if authentication fails, try refreshing the API key
+          if (response.status === 401) {
+            console.log('Authentication failed. Forcing refresh of API key...');
+            const freshEnv = refreshEnv();
+            this.apiKey = freshEnv.OPENROUTER_API_KEY;
+          }
+          
+          throw new Error(`OpenRouter API error: ${response.status} ${errorText}`);
+        }
+
+        // Process the streaming response
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        let fullContent = '';
+        let model = '';
+        let usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+        
+        if (!reader) {
+          throw new Error('Failed to get reader from stream');
+        }
+        
+        // Read the stream data
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          // Decode the chunk value
+          const chunk = decoder.decode(value, { stream: true });
+          
+          // Process each SSE line
+          const lines = chunk.split('\n').filter(line => line.trim() !== '');
+          
+          for (const line of lines) {
+            // Skip non-data lines
+            if (!line.startsWith('data: ')) continue;
+            
+            // Extract the data portion
+            const data = line.substring(6);
+            
+            // Handle end of stream marker
+            if (data === '[DONE]') continue;
+            
+            try {
+              // Parse JSON data
+              const parsedData = JSON.parse(data);
+              
+              // Extract the delta content if available
+              if (parsedData.choices && parsedData.choices[0]?.delta?.content) {
+                const contentChunk = parsedData.choices[0].delta.content;
+                fullContent += contentChunk;
+                
+                // Update model info if available
+                if (parsedData.model && !model) {
+                  model = parsedData.model;
+                }
+                
+                // Update usage info if available
+                if (parsedData.usage) {
+                  usage = parsedData.usage;
+                }
+                
+                // Invoke the callback with the content chunk
+                if (callback) {
+                  callback(contentChunk);
+                }
+              }
+            } catch (parseError) {
+              console.error('Error parsing streaming data:', parseError);
+              continue; // Continue processing other chunks
+            }
+          }
+        }
+        
+        // Return the final response
+        return {
+          content: fullContent,
+          metadata: {
+            model: model || this.options.modelId,
+            usage,
+            raw: { model, usage }
+          }
+        };
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    } catch (error) {
+      console.error('Error in OpenRouter provider streaming:', error);
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('OpenRouter streaming request timed out after 3 minutes');
       }
       throw error;
     }
