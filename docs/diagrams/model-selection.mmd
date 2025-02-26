@@ -1,0 +1,29 @@
+graph TD
+    A[Content to Analyze] --> B{Content Type?}
+    B -->|Technical| C[DeepSeek R1]
+    B -->|Academic/Scholarly| D[Claude 3.7 Sonnet]
+    B -->|General| E[Sonar Reasoning]
+    B -->|Large Document| F[Gemini Flash]
+    
+    C --> G{Relevance Score?}
+    D --> G
+    E --> G
+    F --> G
+    
+    G -->|High > 0.8| H[Deep Analysis<br>Claude 3.7 Sonnet]
+    G -->|Medium 0.5-0.8| I[Standard Analysis<br>DeepSeek R1]
+    G -->|Low < 0.5| J[Quick Analysis<br>DeepSeek Distill 70B]
+    
+    H --> K[Result with Confidence Score]
+    I --> K
+    J --> K
+    
+    classDef decision fill:#ffcc99,stroke:#333,stroke-width:1px;
+    classDef model fill:#99ccff,stroke:#333,stroke-width:1px;
+    classDef input fill:#ccffcc,stroke:#333,stroke-width:1px;
+    classDef output fill:#ffcccc,stroke:#333,stroke-width:1px;
+    
+    class A input;
+    class B,G decision;
+    class C,D,E,F,H,I,J model;
+    class K output; 

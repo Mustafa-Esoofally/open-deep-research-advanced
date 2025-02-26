@@ -1,0 +1,34 @@
+sequenceDiagram
+    participant User
+    participant Frontend
+    participant QueryPlanner
+    participant SearchService
+    participant ModelPool
+    participant Aggregator
+    
+    User->>Frontend: Submit Research Topic
+    Frontend->>QueryPlanner: Decompose Topic
+    Note over QueryPlanner: Using Claude 3.7 Sonnet
+    
+    QueryPlanner->>Frontend: Stream: Planning Started
+    QueryPlanner-->>Frontend: Stream: Generating Queries
+    
+    loop For each query batch (20-30 queries)
+        QueryPlanner->>SearchService: Execute Searches in Parallel
+        SearchService-->>Frontend: Stream: Search Progress
+        
+        loop For each result
+            SearchService->>ModelPool: Analyze Content
+            Note over ModelPool: Selects Appropriate Model<br>Based on Content Type
+            ModelPool-->>Frontend: Stream: Analysis Progress
+        end
+        
+        ModelPool->>Aggregator: Batch Results
+        Aggregator-->>Frontend: Stream: Batch Summary
+    end
+    
+    Aggregator->>Aggregator: Final Synthesis
+    Note over Aggregator: Using Claude 3.7 Sonnet
+    
+    Aggregator->>Frontend: Stream: Complete Results
+    Frontend->>User: Display Research Report 

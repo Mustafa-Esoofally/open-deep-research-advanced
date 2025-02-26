@@ -1,0 +1,28 @@
+graph TD
+    A[User Query] --> B[Query Decomposition<br>Claude 3.7 Sonnet]
+    B --> C1[Web Search 1<br>Firecrawl]
+    B --> C2[Web Search 2<br>Firecrawl]
+    B --> C3[Web Search 3<br>Firecrawl]
+    B --> CN[Web Search N<br>Firecrawl]
+    
+    subgraph "Content Processing Pipeline"
+        C1 --> D1[Model A<br>DeepSeek R1]
+        C2 --> D2[Model B<br>Sonar Reasoning]
+        C3 --> D3[Model C<br>Claude 3.7 Sonnet]
+        CN --> D4[Model D<br>Gemini Flash]
+    end
+    
+    D1 --> E[Result Aggregation<br>Claude 3.7 Sonnet]
+    D2 --> E
+    D3 --> E
+    D4 --> E
+    
+    E --> F[Progressive UI Updates<br>Stream]
+    
+    classDef primaryNode fill:#f9d5e5,stroke:#333,stroke-width:2px;
+    classDef secondaryNode fill:#d3f0ee,stroke:#333,stroke-width:1px;
+    classDef processingNode fill:#eeeeee,stroke:#999,stroke-width:1px;
+    
+    class A,B,E,F primaryNode;
+    class C1,C2,C3,CN secondaryNode;
+    class D1,D2,D3,D4 processingNode; 

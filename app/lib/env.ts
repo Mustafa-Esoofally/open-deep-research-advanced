@@ -46,7 +46,6 @@ const AVAILABLE_MODELS = [
   'deepseek/deepseek-r1:free',
   'groq/deepseek-r1-distill-llama-70b',
   'perplexity/sonar-reasoning',
-  'aion-labs/aion-1.0',
   'anthropic/claude-3.7-sonnet',
   'google/gemini-2.0-flash-001',
   // Legacy options for backward compatibility

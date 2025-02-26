@@ -16,6 +16,15 @@ export interface Source {
   favicon?: string;
 }
 
+// Activity type for tracking research activities
+export interface Activity {
+  id: string;
+  type: 'search' | 'extract' | 'analyze' | 'reasoning' | 'synthesis' | 'thought';
+  status: 'pending' | 'complete' | 'error';
+  message: string;
+  timestamp: string;
+}
+
 // State type for research component
 export interface ResearchState {
   messages: Message[];
@@ -31,6 +40,7 @@ export interface ResearchState {
   error: string | null;
   modelKey: string;
   traces: string[];
+  activities: Activity[];
 }
 
 // Initial state for research component
@@ -47,5 +57,6 @@ export const initialResearchState: ResearchState = {
   status: '',
   error: null,
   modelKey: process.env.NEXT_PUBLIC_DEFAULT_MODEL_KEY || 'deepseek-r1',
-  traces: []
+  traces: [],
+  activities: []
 }; 
