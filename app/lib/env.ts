@@ -4,9 +4,10 @@
  */
 
 // Critical environment variables that must be set for the application to work
-const REQUIRED_SERVER_ENV_VARS = [
-  'NEXT_SERVER_OPENROUTER_API_KEY',
-  'NEXT_SERVER_FIRECRAWL_API_KEY'
+// We'll check both the prefixed and non-prefixed versions
+const REQUIRED_ENV_VARS = [
+  { prefixed: 'NEXT_SERVER_OPENROUTER_API_KEY', regular: 'OPENROUTER_API_KEY' },
+  { prefixed: 'NEXT_SERVER_FIRECRAWL_API_KEY', regular: 'FIRECRAWL_API_KEY' }
 ];
 
 // Available model options for validation
@@ -25,18 +26,21 @@ const AVAILABLE_MODELS = [
 ];
 
 /**
- * Multiple checks to detect if we're in a build environment
- * This is crucial to prevent environment validation errors during build
+ * Multiple checks to detect if we're in a build environment or browser
+ * This is crucial to prevent environment validation errors during build or in browser
  */
 export const isBuildTime = () => {
+  // Check if we're running in the browser
+  const isBrowser = typeof window !== 'undefined';
+  
   // Common Next.js build environments
   const isNextBuild = process.env.NEXT_PHASE === 'phase-production-build';
   const isVercelBuild = process.env.VERCEL === '1' && !process.env.VERCEL_ENV;
   const isCIBuild = process.env.CI === 'true' || process.env.CI === '1';
   
   // Build vs runtime context
-  if (typeof process !== 'undefined' && 
-      typeof window === 'undefined' && 
+  if (!isBrowser && 
+      typeof process !== 'undefined' && 
       process.env.NODE_ENV === 'production') {
     if (isNextBuild || isVercelBuild || isCIBuild) {
       console.log('🔨 Build-time environment detected');
@@ -47,6 +51,9 @@ export const isBuildTime = () => {
   return false;
 };
 
+// Detect if we're in a browser environment - never validate env vars in browser
+const IS_BROWSER = typeof window !== 'undefined';
+
 // Initialize the build time detection early
 const IS_BUILD_TIME = isBuildTime();
 
@@ -54,17 +61,23 @@ const IS_BUILD_TIME = isBuildTime();
  * Validates if all required environment variables are set
  */
 export function validateEnv(): { valid: boolean; missing: string[] } {
-  // Skip validation during build time
-  if (IS_BUILD_TIME) {
+  // Skip validation during build time or in browser
+  if (IS_BUILD_TIME || IS_BROWSER) {
     return { valid: true, missing: [] };
   }
 
   const missing: string[] = [];
 
-  // Check for required environment variables
-  for (const envVar of REQUIRED_SERVER_ENV_VARS) {
-    if (!process.env[envVar] || process.env[envVar]?.trim() === '') {
-      missing.push(envVar);
+  // Check for required environment variables (both prefixed and regular versions)
+  for (const envVar of REQUIRED_ENV_VARS) {
+    // Check if either the prefixed or regular version is set
+    const prefixedValue = process.env[envVar.prefixed];
+    const regularValue = process.env[envVar.regular];
+    
+    if ((!prefixedValue || prefixedValue.trim() === '') && 
+        (!regularValue || regularValue.trim() === '')) {
+      // If neither version is set, add both to the missing array for better error reporting
+      missing.push(`${envVar.prefixed} or ${envVar.regular}`);
     }
   }
 
@@ -73,7 +86,7 @@ export function validateEnv(): { valid: boolean; missing: string[] } {
     console.error(`\n⚠️ Missing environment variables: ${missing.join(', ')}`);
     console.error(`Add them to your .env.local file in this format:\n`);
     for (const missingVar of missing) {
-      console.error(`${missingVar}=your-value-here`);
+      console.error(`${missingVar.split(' or ')[0]}=your-value-here`);
     }
     console.error(`\nThen restart your development server.\n`);
   }
@@ -88,9 +101,9 @@ export function validateEnv(): { valid: boolean; missing: string[] } {
  * Gets an API key with proper fallback and validation
  */
 function getApiKey(key: string, fallback: string = ''): string {
-  // During build time, always return a placeholder to prevent build failures
-  if (IS_BUILD_TIME) {
-    return 'build-time-placeholder';
+  // During build time or in browser, always return a placeholder to prevent errors
+  if (IS_BUILD_TIME || IS_BROWSER) {
+    return 'placeholder-for-client-side';
   }
   
   // Check for server prefix first, then regular name
@@ -129,22 +142,28 @@ export const env = {
   // Environment status
   IS_DEV: process.env.NODE_ENV === 'development',
   IS_PROD: process.env.NODE_ENV === 'production',
-  IS_BUILD_TIME: IS_BUILD_TIME,
+  IS_BUILD_TIME,
+  IS_BROWSER,
   
   // Check if we're missing any required variables (for conditional logic)
   IS_VALID: () => validateEnv().valid
 };
 
-// For logging only - we never throw errors during initialization
+// For logging only - we never throw errors during initialization in browser or build
 if (IS_BUILD_TIME) {
   console.log('🔨 Running in build mode - environment validation skipped');
+} else if (IS_BROWSER) {
+  // No validation in browser - just log in development
+  if (env.IS_DEV) {
+    console.log('🌐 Running in browser - environment validation skipped');
+  }
 } else {
   const envStatus = validateEnv();
   if (!envStatus.valid) {
     console.error(`⚠️ Missing required environment variables: ${envStatus.missing.join(', ')}`);
     
-    // Only throw in production runtime, never during build
-    if (process.env.NODE_ENV === 'production' && !IS_BUILD_TIME) {
+    // Only throw in production server-side runtime, never during build or in browser
+    if (process.env.NODE_ENV === 'production' && !IS_BUILD_TIME && !IS_BROWSER) {
       throw new Error(`Missing required environment variables: ${envStatus.missing.join(', ')}`);
     }
   }

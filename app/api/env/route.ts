@@ -8,8 +8,8 @@ import { validateEnv, env } from '@/app/lib/env';
  */
 export async function GET() {
   // Always return a valid response during build time
-  if (env.IS_BUILD_TIME) {
-    console.log('🔨 Environment check API: Build-time detected, returning mock response');
+  if (env.IS_BUILD_TIME || env.IS_BROWSER) {
+    console.log('🔨 Environment check API: Build-time or browser detected, returning mock response');
     return new Response(
       JSON.stringify({
         valid: true,
@@ -17,7 +17,8 @@ export async function GET() {
         config: {
           nodeEnv: env.NODE_ENV,
           appName: env.APP_NAME,
-          isBuildTime: true
+          isBuildTime: env.IS_BUILD_TIME,
+          isBrowser: env.IS_BROWSER
         }
       }),
       {
@@ -49,6 +50,12 @@ export async function GET() {
         config: {
           nodeEnv: env.NODE_ENV,
           appName: env.APP_NAME,
+          // Safe to show which model we're using
+          openrouterModel: env.OPENROUTER_MODEL,
+          defaultModelKey: env.DEFAULT_MODEL_KEY,
+          // Show if keys are present without exposing the actual keys
+          hasOpenRouterKey: Boolean(env.OPENROUTER_API_KEY) && env.OPENROUTER_API_KEY !== 'placeholder-for-client-side',
+          hasFirecrawlKey: Boolean(env.FIRECRAWL_API_KEY) && env.FIRECRAWL_API_KEY !== 'placeholder-for-client-side',
         },
         // Help message for developers
         development: env.IS_DEV ? {
