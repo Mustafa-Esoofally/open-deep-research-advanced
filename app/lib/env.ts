@@ -25,42 +25,29 @@ const AVAILABLE_MODELS = [
 ];
 
 /**
- * Determines if the code is running during build time on Vercel
- * Used to prevent environment validation errors during build
- * 
- * During Vercel builds, VERCEL=1 but VERCEL_ENV is not set
- * Also check for CI=1 which is present in Vercel build environments
+ * Multiple checks to detect if we're in a build environment
+ * This is crucial to prevent environment validation errors during build
  */
 export const isBuildTime = () => {
-  // First, basic detection that works in most cases
-  if (
-    process.env.NODE_ENV === 'production' && 
-    process.env.VERCEL === '1' && 
-    !process.env.VERCEL_ENV
-  ) {
-    return true;
-  }
+  // Common Next.js build environments
+  const isNextBuild = process.env.NEXT_PHASE === 'phase-production-build';
+  const isVercelBuild = process.env.VERCEL === '1' && !process.env.VERCEL_ENV;
+  const isCIBuild = process.env.CI === 'true' || process.env.CI === '1';
   
-  // Secondary detection for CI environment
-  if (
-    process.env.NODE_ENV === 'production' && 
-    process.env.CI === '1'
-  ) {
-    return true;
-  }
-  
-  // Third, check if we're in a Vercel build command context
-  if (
-    process.env.VERCEL_ENV === 'production' && 
-    process.env.NEXT_PHASE === 'phase-production-build'
-  ) {
-    return true;
+  // Build vs runtime context
+  if (typeof process !== 'undefined' && 
+      typeof window === 'undefined' && 
+      process.env.NODE_ENV === 'production') {
+    if (isNextBuild || isVercelBuild || isCIBuild) {
+      console.log('🔨 Build-time environment detected');
+      return true;
+    }
   }
   
   return false;
 };
 
-// Cached build time detection to avoid recalculating
+// Initialize the build time detection early
 const IS_BUILD_TIME = isBuildTime();
 
 /**
@@ -101,6 +88,11 @@ export function validateEnv(): { valid: boolean; missing: string[] } {
  * Gets an API key with proper fallback and validation
  */
 function getApiKey(key: string, fallback: string = ''): string {
+  // During build time, always return a placeholder to prevent build failures
+  if (IS_BUILD_TIME) {
+    return 'build-time-placeholder';
+  }
+  
   // Check for server prefix first, then regular name
   const serverKey = `NEXT_SERVER_${key}`;
   const value = process.env[serverKey] || process.env[key] || fallback;
@@ -108,11 +100,6 @@ function getApiKey(key: string, fallback: string = ''): string {
   // Only warn in development mode
   if (!value && process.env.NODE_ENV === 'development') {
     console.warn(`⚠️ Warning: ${key} is not set. Using fallback.`);
-  }
-  
-  // During build time, always return a placeholder to prevent build failures
-  if (IS_BUILD_TIME) {
-    return 'build-time-placeholder';
   }
   
   return value;
@@ -148,7 +135,7 @@ export const env = {
   IS_VALID: () => validateEnv().valid
 };
 
-// For logging only - don't throw errors
+// For logging only - we never throw errors during initialization
 if (IS_BUILD_TIME) {
   console.log('🔨 Running in build mode - environment validation skipped');
 } else {

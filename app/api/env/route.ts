@@ -1,12 +1,15 @@
 import { NextRequest } from 'next/server';
 import { validateEnv, env } from '@/app/lib/env';
 
-// This is a safe API endpoint to verify environment variables
-// It doesn't expose actual keys, just validation status
+/**
+ * Safe API endpoint to verify environment variables status
+ * It deliberately doesn't expose actual keys, just validation status
+ * During build time, it always returns a successful response
+ */
 export async function GET() {
   // Always return a valid response during build time
   if (env.IS_BUILD_TIME) {
-    console.log('🔨 Environment check API called during build time - returning mock response');
+    console.log('🔨 Environment check API: Build-time detected, returning mock response');
     return new Response(
       JSON.stringify({
         valid: true,
@@ -28,7 +31,7 @@ export async function GET() {
   }
   
   try {
-    // Check environment variables
+    // Check environment variables during runtime
     const envStatus = validateEnv();
     
     // Determine the appropriate status code
