@@ -16,16 +16,19 @@ const apiLogger = (message: string, data?: any) => {
 };
 
 export async function POST(req: NextRequest) {
-  // Always return a mock response during build time 
-  if (env.IS_BUILD_TIME) {
-    console.log('🔨 Research API called during build time - returning mock response');
+  // Always return a mock response during build time or if missing environment variables
+  if (env.IS_BUILD_TIME || env.IS_BROWSER || !env.IS_VALID()) {
+    // If we're in browser or missing env vars, return a friendly message
+    const reason = env.IS_BROWSER ? 'client-side' : (env.IS_BUILD_TIME ? 'build-time' : 'missing environment variables');
+    
+    console.log(`⚠️ Research API called during ${reason} - returning friendly error message`);
     return new Response(
       JSON.stringify({
-        type: 'info',
-        content: 'This is a build-time request, not a runtime request.',
+        type: 'error',
+        content: `API cannot be used directly from ${reason}. Please ensure server environment variables are properly configured.`,
       }),
       {
-        status: 200,
+        status: 200,  // Use 200 to prevent error pages
         headers: {
           'Content-Type': 'application/json',
         },
