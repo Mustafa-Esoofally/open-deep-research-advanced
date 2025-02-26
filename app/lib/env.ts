@@ -116,10 +116,13 @@ if (!envStatus.valid) {
   console.error(`⚠️ Missing required environment variables: ${envStatus.missing.join(', ')}`);
   console.error(`Check that you've created .env.local in the project root with these variables.`);
   
-  // Only throw an error in production mode AND during runtime (not build time)
+  // Only throw an error in production mode AND during actual runtime (not build time)
   // During Vercel builds, we'll log but not throw
-  // The VERCEL_ENV variable is only set during runtime, not build time
-  if (process.env.NODE_ENV === 'production' && process.env.VERCEL_ENV) {
+  if (process.env.NODE_ENV === 'production' && 
+      // Check if we're in a browser or actual runtime context, not build time
+      typeof window !== 'undefined' || 
+      // VERCEL_DEPLOYMENT_ID is available during runtime, not during build
+      process.env.VERCEL_DEPLOYMENT_ID) {
     throw new Error(`Missing required environment variables: ${envStatus.missing.join(', ')}`);
   }
 }
