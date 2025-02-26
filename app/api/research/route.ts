@@ -1,18 +1,11 @@
 import { NextRequest } from 'next/server';
 import { UnifiedResearchAgent } from '@/app/lib/models/unified-research-agent';
-import { refreshEnv } from '@/app/lib/env';
+import { env } from '@/app/lib/env';
 import { modelRegistry } from '@/app/lib/models/providers';
-
-// Build-time detection
-// During Vercel build, process.env.VERCEL is set but process.env.VERCEL_ENV is not
-const IS_BUILD_TIME = 
-  process.env.NODE_ENV === 'production' && 
-  process.env.VERCEL && 
-  !process.env.VERCEL_ENV;
 
 // Add a simple logger utility for API routes
 const apiLogger = (message: string, data?: any) => {
-  if (process.env.NODE_ENV === 'development') {
+  if (env.IS_DEV) {
     const timestamp = new Date().toISOString().substring(11, 19);
     if (data) {
       console.log(`[${timestamp}] 🔌 [API] ${message}`, data);
@@ -22,14 +15,9 @@ const apiLogger = (message: string, data?: any) => {
   }
 };
 
-// Only refresh environment at runtime, not during build time
-if (!IS_BUILD_TIME) {
-  refreshEnv();
-}
-
 export async function POST(req: NextRequest) {
   // Skip processing during build time 
-  if (IS_BUILD_TIME) {
+  if (env.IS_BUILD_TIME) {
     return new Response(
       JSON.stringify({
         type: 'error',
@@ -63,7 +51,7 @@ export async function POST(req: NextRequest) {
     let validatedModelKey = modelKey;
     if (!modelKey || !modelRegistry.getModelConfig(modelKey)) {
       // Use default model if invalid
-      validatedModelKey = process.env.DEFAULT_MODEL_KEY || 'deepseek-r1';
+      validatedModelKey = env.DEFAULT_MODEL_KEY;
       apiLogger(`Invalid model key: ${modelKey}, using default: ${validatedModelKey}`);
     }
 

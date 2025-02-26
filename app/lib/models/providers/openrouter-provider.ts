@@ -1,12 +1,5 @@
 import { BaseModelProvider, ChatMessage, ModelProviderOptions, ModelResponse, StreamChunkCallback } from './base-provider';
-import { env, refreshEnv } from '../../env';
-
-// Build-time detection
-// During Vercel build, process.env.VERCEL is set but process.env.VERCEL_ENV is not
-const IS_BUILD_TIME = 
-  process.env.NODE_ENV === 'production' && 
-  process.env.VERCEL && 
-  !process.env.VERCEL_ENV;
+import { env } from '../../env';
 
 // Extended options for OpenRouter
 export interface OpenRouterOptions extends ModelProviderOptions {
@@ -24,7 +17,6 @@ export interface OpenRouterOptions extends ModelProviderOptions {
 }
 
 export class OpenRouterProvider extends BaseModelProvider {
-  private lastKeyRefresh: number;
   private apiKey: string;
   private baseUrl: string;
   private appName: string;
@@ -33,7 +25,6 @@ export class OpenRouterProvider extends BaseModelProvider {
   
   constructor(options: OpenRouterOptions) {
     super(options);
-    this.lastKeyRefresh = Date.now();
     
     // Get environment variables or use defaults
     this.apiKey = options.apiKey || env.OPENROUTER_API_KEY;
@@ -42,31 +33,13 @@ export class OpenRouterProvider extends BaseModelProvider {
     this.appUrl = options.appUrl || env.APP_URL || 'https://example.com';
     this.providerRouting = options.providerRouting;
     
-    if (!IS_BUILD_TIME && !this.apiKey) {
+    if (!env.IS_BUILD_TIME && !this.apiKey) {
       console.warn('WARNING: OpenRouter API key not found. Set NEXT_SERVER_OPENROUTER_API_KEY in your .env.local file.');
-    }
-  }
-  
-  private refreshApiKey() {
-    // Skip refresh during build time
-    if (IS_BUILD_TIME) {
-      return;
-    }
-    
-    // Check if it's been more than 5 minutes since last refresh
-    const now = Date.now();
-    if (now - this.lastKeyRefresh > 5 * 60 * 1000) {
-      const freshEnv = refreshEnv();
-      this.apiKey = freshEnv.OPENROUTER_API_KEY;
-      this.lastKeyRefresh = now;
     }
   }
   
   async chat(messages: ChatMessage[]): Promise<ModelResponse> {
     try {
-      // Always use the latest API key
-      this.refreshApiKey();
-      
       if (!this.apiKey || this.apiKey.trim() === '') {
         console.error('ERROR: No OpenRouter API key found.');
         throw new Error('OpenRouter API key is not set');
@@ -104,13 +77,6 @@ export class OpenRouterProvider extends BaseModelProvider {
         if (!response.ok) {
           const errorText = await response.text();
           console.error('OpenRouter API error:', response.status, errorText);
-          
-          // Handle special case: if authentication fails, try refreshing the API key
-          if (response.status === 401) {
-            console.log('Authentication failed. Forcing refresh of API key...');
-            this.refreshApiKey();
-          }
-          
           throw new Error(`OpenRouter API error: ${response.status} ${errorText}`);
         }
   
@@ -149,9 +115,6 @@ export class OpenRouterProvider extends BaseModelProvider {
 
   async streamChat(messages: ChatMessage[], callback: StreamChunkCallback): Promise<ModelResponse> {
     try {
-      // Always use the latest API key
-      this.refreshApiKey();
-      
       if (!this.apiKey || this.apiKey.trim() === '') {
         console.error('ERROR: No OpenRouter API key found.');
         throw new Error('OpenRouter API key is not set');
@@ -190,13 +153,6 @@ export class OpenRouterProvider extends BaseModelProvider {
         if (!response.ok) {
           const errorText = await response.text();
           console.error('OpenRouter API streaming error:', response.status, errorText);
-          
-          // Handle special case: if authentication fails, try refreshing the API key
-          if (response.status === 401) {
-            console.log('Authentication failed. Forcing refresh of API key...');
-            this.refreshApiKey();
-          }
-          
           throw new Error(`OpenRouter API error: ${response.status} ${errorText}`);
         }
 
