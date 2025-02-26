@@ -4,29 +4,30 @@ import { validateEnv, env } from '@/app/lib/env';
 // This is a safe API endpoint to verify environment variables
 // It doesn't expose actual keys, just validation status
 export async function GET() {
-  try {
-    // If we're in a build process, return a valid response to prevent build failures
-    if (env.IS_BUILD_TIME) {
-      return new Response(
-        JSON.stringify({
-          valid: true,
-          missingVariables: [],
-          config: {
-            nodeEnv: env.NODE_ENV,
-            appName: env.APP_NAME,
-            isBuildTime: true
-          }
-        }),
-        {
-          status: 200,
-          headers: {
-            'Content-Type': 'application/json',
-            'Cache-Control': 'no-cache, no-store, must-revalidate'
-          }
+  // Always return a valid response during build time
+  if (env.IS_BUILD_TIME) {
+    console.log('🔨 Environment check API called during build time - returning mock response');
+    return new Response(
+      JSON.stringify({
+        valid: true,
+        missingVariables: [],
+        config: {
+          nodeEnv: env.NODE_ENV,
+          appName: env.APP_NAME,
+          isBuildTime: true
         }
-      );
-    }
-    
+      }),
+      {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate'
+        }
+      }
+    );
+  }
+  
+  try {
     // Check environment variables
     const envStatus = validateEnv();
     
@@ -63,7 +64,6 @@ export async function GET() {
     );
   } catch (error) {
     // Provide a fallback response if there's an error
-    // This ensures the API route won't fail during build
     console.error('Error in environment check API:', error);
     return new Response(
       JSON.stringify({

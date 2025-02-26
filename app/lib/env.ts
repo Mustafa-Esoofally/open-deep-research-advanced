@@ -27,18 +27,48 @@ const AVAILABLE_MODELS = [
 /**
  * Determines if the code is running during build time on Vercel
  * Used to prevent environment validation errors during build
+ * 
+ * During Vercel builds, VERCEL=1 but VERCEL_ENV is not set
+ * Also check for CI=1 which is present in Vercel build environments
  */
-export const isBuildTime = 
-  process.env.NODE_ENV === 'production' && 
-  process.env.VERCEL && 
-  !process.env.VERCEL_ENV;
+export const isBuildTime = () => {
+  // First, basic detection that works in most cases
+  if (
+    process.env.NODE_ENV === 'production' && 
+    process.env.VERCEL === '1' && 
+    !process.env.VERCEL_ENV
+  ) {
+    return true;
+  }
+  
+  // Secondary detection for CI environment
+  if (
+    process.env.NODE_ENV === 'production' && 
+    process.env.CI === '1'
+  ) {
+    return true;
+  }
+  
+  // Third, check if we're in a Vercel build command context
+  if (
+    process.env.VERCEL_ENV === 'production' && 
+    process.env.NEXT_PHASE === 'phase-production-build'
+  ) {
+    return true;
+  }
+  
+  return false;
+};
+
+// Cached build time detection to avoid recalculating
+const IS_BUILD_TIME = isBuildTime();
 
 /**
  * Validates if all required environment variables are set
  */
 export function validateEnv(): { valid: boolean; missing: string[] } {
   // Skip validation during build time
-  if (isBuildTime) {
+  if (IS_BUILD_TIME) {
     return { valid: true, missing: [] };
   }
 
@@ -81,7 +111,7 @@ function getApiKey(key: string, fallback: string = ''): string {
   }
   
   // During build time, always return a placeholder to prevent build failures
-  if (isBuildTime) {
+  if (IS_BUILD_TIME) {
     return 'build-time-placeholder';
   }
   
@@ -112,20 +142,23 @@ export const env = {
   // Environment status
   IS_DEV: process.env.NODE_ENV === 'development',
   IS_PROD: process.env.NODE_ENV === 'production',
-  IS_BUILD_TIME: isBuildTime,
+  IS_BUILD_TIME: IS_BUILD_TIME,
   
   // Check if we're missing any required variables (for conditional logic)
   IS_VALID: () => validateEnv().valid
 };
 
-// Validate the environment when this module is imported
-// But don't throw errors during build time
-const envStatus = validateEnv();
-if (!envStatus.valid && !isBuildTime) {
-  console.error(`⚠️ Missing required environment variables: ${envStatus.missing.join(', ')}`);
-  
-  // Only throw in production runtime
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error(`Missing required environment variables: ${envStatus.missing.join(', ')}`);
+// For logging only - don't throw errors
+if (IS_BUILD_TIME) {
+  console.log('🔨 Running in build mode - environment validation skipped');
+} else {
+  const envStatus = validateEnv();
+  if (!envStatus.valid) {
+    console.error(`⚠️ Missing required environment variables: ${envStatus.missing.join(', ')}`);
+    
+    // Only throw in production runtime, never during build
+    if (process.env.NODE_ENV === 'production' && !IS_BUILD_TIME) {
+      throw new Error(`Missing required environment variables: ${envStatus.missing.join(', ')}`);
+    }
   }
 } 

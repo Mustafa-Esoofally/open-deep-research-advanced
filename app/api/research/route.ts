@@ -16,11 +16,12 @@ const apiLogger = (message: string, data?: any) => {
 };
 
 export async function POST(req: NextRequest) {
-  // Skip processing during build time 
+  // Always return a mock response during build time 
   if (env.IS_BUILD_TIME) {
+    console.log('🔨 Research API called during build time - returning mock response');
     return new Response(
       JSON.stringify({
-        type: 'error',
+        type: 'info',
         content: 'This is a build-time request, not a runtime request.',
       }),
       {
