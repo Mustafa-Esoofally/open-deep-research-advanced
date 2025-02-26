@@ -3,6 +3,13 @@ import { UnifiedResearchAgent } from '@/app/lib/models/unified-research-agent';
 import { refreshEnv } from '@/app/lib/env';
 import { modelRegistry } from '@/app/lib/models/providers';
 
+// Build-time detection
+// During Vercel build, process.env.VERCEL is set but process.env.VERCEL_ENV is not
+const IS_BUILD_TIME = 
+  process.env.NODE_ENV === 'production' && 
+  process.env.VERCEL && 
+  !process.env.VERCEL_ENV;
+
 // Add a simple logger utility for API routes
 const apiLogger = (message: string, data?: any) => {
   if (process.env.NODE_ENV === 'development') {
@@ -15,10 +22,28 @@ const apiLogger = (message: string, data?: any) => {
   }
 };
 
-// Force environment refresh at the start of each API call
-refreshEnv();
+// Only refresh environment at runtime, not during build time
+if (!IS_BUILD_TIME) {
+  refreshEnv();
+}
 
 export async function POST(req: NextRequest) {
+  // Skip processing during build time 
+  if (IS_BUILD_TIME) {
+    return new Response(
+      JSON.stringify({
+        type: 'error',
+        content: 'This is a build-time request, not a runtime request.',
+      }),
+      {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+  }
+
   const start = Date.now();
   apiLogger('Research API route called');
   

@@ -1,18 +1,19 @@
 import { NextRequest } from 'next/server';
 import { validateEnv, refreshEnv } from '@/app/lib/env';
 
-// Check if we're in a build process (not runtime)
-const isBuildProcess = 
+// Build-time detection
+// During Vercel build, process.env.VERCEL is set but process.env.VERCEL_ENV is not
+const IS_BUILD_TIME = 
   process.env.NODE_ENV === 'production' && 
-  typeof window === 'undefined' && 
-  !process.env.VERCEL_DEPLOYMENT_ID;
+  process.env.VERCEL && 
+  !process.env.VERCEL_ENV;
 
 // This is a safe API endpoint to verify environment variables
 // It doesn't expose actual keys, just validation status
 export async function GET() {
   try {
     // If we're in a build process, return a valid response to prevent build failures
-    if (isBuildProcess) {
+    if (IS_BUILD_TIME) {
       return new Response(
         JSON.stringify({
           valid: true,

@@ -3,6 +3,13 @@ import axios from 'axios';
 import { set } from 'zod';
 import { env, refreshEnv } from './env';
 
+// Build-time detection
+// During Vercel build, process.env.VERCEL is set but process.env.VERCEL_ENV is not
+const IS_BUILD_TIME = 
+  process.env.NODE_ENV === 'production' && 
+  process.env.VERCEL && 
+  !process.env.VERCEL_ENV;
+
 // Get a fresh copy of environment variables
 const runtimeEnv = refreshEnv();
 
@@ -17,7 +24,7 @@ const APP_NAME = runtimeEnv.APP_NAME;
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 
 // Validate critical configuration
-if (!OPENROUTER_API_KEY || OPENROUTER_API_KEY.trim() === '') {
+if (!IS_BUILD_TIME && (!OPENROUTER_API_KEY || OPENROUTER_API_KEY.trim() === '')) {
   console.error('⚠️ ERROR: OpenRouter API key is not set in environment variables.');
   console.error('Please set NEXT_SERVER_OPENROUTER_API_KEY in your .env.local file in the project root.');
   // In development, we'll show a warning but allow the app to start

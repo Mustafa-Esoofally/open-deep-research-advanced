@@ -11,8 +11,20 @@ const REQUIRED_ENV_VARS = ['NEXT_SERVER_OPENROUTER_API_KEY', 'NEXT_SERVER_FIRECR
 const ENVIRONMENT_CACHE_KEY = 'env_cache_last_updated';
 let lastLoadTime = Date.now();
 
+// Build-time detection
+// During Vercel build, process.env.VERCEL is set but process.env.VERCEL_ENV is not
+const IS_BUILD_TIME = 
+  process.env.NODE_ENV === 'production' && 
+  process.env.VERCEL && 
+  !process.env.VERCEL_ENV;
+
 // Environment variable validation
 export function validateEnv(): { valid: boolean; missing: string[] } {
+  // Skip validation during build time
+  if (IS_BUILD_TIME) {
+    return { valid: true, missing: [] };
+  }
+
   const missing: string[] = [];
 
   // Check for required environment variables
@@ -118,17 +130,31 @@ if (!envStatus.valid) {
   
   // Only throw an error in production mode AND during actual runtime (not build time)
   // During Vercel builds, we'll log but not throw
-  if (process.env.NODE_ENV === 'production' && 
-      // Check if we're in a browser or actual runtime context, not build time
-      typeof window !== 'undefined' || 
-      // VERCEL_DEPLOYMENT_ID is available during runtime, not during build
-      process.env.VERCEL_DEPLOYMENT_ID) {
+  if (process.env.NODE_ENV === 'production' && !IS_BUILD_TIME) {
     throw new Error(`Missing required environment variables: ${envStatus.missing.join(', ')}`);
   }
 }
 
 // Get a fresh copy of environment variables
 export function refreshEnv() {
+  // Skip reloading during build time
+  if (IS_BUILD_TIME) {
+    // Return a mock environment during build time with dummy values
+    return {
+      OPENROUTER_API_KEY: 'build-time-placeholder',
+      FIRECRAWL_API_KEY: 'build-time-placeholder',
+      OPENROUTER_MODEL: 'openai/o3-mini',
+      OPENROUTER_TEMPERATURE: 0.7,
+      OPENROUTER_MAX_TOKENS: 4000,
+      OPENROUTER_BASE_URL: 'https://openrouter.ai/api/v1',
+      DEFAULT_MODEL_KEY: 'deepseek-distill-70b',
+      APP_URL: 'http://localhost:3000',
+      APP_NAME: 'Advanced Deep Research',
+      NODE_ENV: process.env.NODE_ENV || 'production',
+      _lastLoaded: Date.now(),
+      _isBuildTime: true
+    };
+  }
   return getEnv(true);
 }
 
