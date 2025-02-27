@@ -2,6 +2,20 @@
  * Environment variables utility
  * This provides a simplified interface for accessing environment variables with validation
  */
+import getConfig from 'next/config';
+
+// Get Next.js runtime configs
+const { serverRuntimeConfig = {}, publicRuntimeConfig = {} } = getConfig() || {
+  serverRuntimeConfig: {},
+  publicRuntimeConfig: {}
+};
+
+// Detect if the runtime configs are empty and log a warning in development
+if (process.env.NODE_ENV === 'development' && 
+    Object.keys(serverRuntimeConfig).length === 0 && 
+    typeof window === 'undefined') {
+  console.warn('⚠️ Server runtime config is empty! Environment variables may not be loaded correctly.');
+}
 
 // Critical environment variables that must be set for the application to work
 // We'll check both the prefixed and non-prefixed versions
@@ -70,13 +84,18 @@ export function validateEnv(): { valid: boolean; missing: string[] } {
 
   // Check for required environment variables (both prefixed and regular versions)
   for (const envVar of REQUIRED_ENV_VARS) {
-    // Check if either the prefixed or regular version is set
+    // Check multiple sources for the variables in order:
+    // 1. Process environment with prefixed name
+    // 2. Next.js serverRuntimeConfig
+    // 3. Process environment with regular name
     const prefixedValue = process.env[envVar.prefixed];
+    const configValue = serverRuntimeConfig[envVar.regular];
     const regularValue = process.env[envVar.regular];
     
     if ((!prefixedValue || prefixedValue.trim() === '') && 
+        (!configValue || configValue.trim() === '') && 
         (!regularValue || regularValue.trim() === '')) {
-      // If neither version is set, add both to the missing array for better error reporting
+      // If no version is set, add both to the missing array for better error reporting
       missing.push(`${envVar.prefixed} or ${envVar.regular}`);
     }
   }
@@ -108,7 +127,17 @@ function getApiKey(key: string, fallback: string = ''): string {
   
   // Check for server prefix first, then regular name
   const serverKey = `NEXT_SERVER_${key}`;
-  const value = process.env[serverKey] || process.env[key] || fallback;
+  
+  // Check multiple sources in order of preference:
+  // 1. Process environment variables prefixed
+  // 2. Next.js serverRuntimeConfig
+  // 3. Process environment variables regular
+  // 4. Fallback value
+  const prefixedValue = process.env[serverKey];
+  const configValue = serverRuntimeConfig[key];
+  const regularValue = process.env[key];
+  
+  const value = prefixedValue || configValue || regularValue || fallback;
   
   // Only warn in development mode
   if (!value && process.env.NODE_ENV === 'development') {
@@ -128,15 +157,18 @@ export const env = {
   
   // Other configuration
   OPENROUTER_MODEL: (() => {
-    const model = process.env.OPENROUTER_MODEL || 'openai/o3-mini';
+    // Check both process.env and publicRuntimeConfig
+    const model = process.env.OPENROUTER_MODEL || 
+                 (publicRuntimeConfig?.OPENROUTER_MODEL) || 
+                 'openai/o3-mini';
     return AVAILABLE_MODELS.includes(model) ? model : 'openai/o3-mini';
   })(),
   OPENROUTER_TEMPERATURE: parseFloat(process.env.OPENROUTER_TEMPERATURE || '0.7'),
   OPENROUTER_MAX_TOKENS: parseInt(process.env.OPENROUTER_MAX_TOKENS || '4000'),
   OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
   DEFAULT_MODEL_KEY: process.env.DEFAULT_MODEL_KEY || 'deepseek-distill-70b',
-  APP_URL: process.env.APP_URL || 'http://localhost:3000',
-  APP_NAME: process.env.APP_NAME || 'Advanced Deep Research',
+  APP_URL: process.env.APP_URL || publicRuntimeConfig?.APP_URL || 'http://localhost:3000',
+  APP_NAME: process.env.APP_NAME || publicRuntimeConfig?.APP_NAME || 'Advanced Deep Research',
   NODE_ENV: process.env.NODE_ENV || 'development',
   
   // Environment status
@@ -148,6 +180,14 @@ export const env = {
   // Check if we're missing any required variables (for conditional logic)
   IS_VALID: () => validateEnv().valid
 };
+
+// Debug output in development mode on server
+if (!IS_BROWSER && env.IS_DEV) {
+  console.log('🔧 Environment Configuration:');
+  console.log(` - Environment: ${env.NODE_ENV}`);
+  console.log(` - API Keys: ${env.OPENROUTER_API_KEY ? '[SET]' : '[NOT SET]'}, ${env.FIRECRAWL_API_KEY ? '[SET]' : '[NOT SET]'}`);
+  console.log(` - Model: ${env.OPENROUTER_MODEL}`);
+}
 
 // For logging only - we never throw errors during initialization in browser or build
 if (IS_BUILD_TIME) {
